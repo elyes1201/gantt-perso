@@ -1,0 +1,554 @@
+{
+  "dataRoles": [
+    {
+      "name": "site",
+      "displayName": "Site",
+      "description": "Site (texte)",
+      "kind": "Grouping",
+      "preferredTypes": [
+        {
+          "text": true
+        }
+      ]
+    },
+    {
+      "name": "product",
+      "displayName": "Produit",
+      "description": "Produit (texte)",
+      "kind": "Grouping",
+      "preferredTypes": [
+        {
+          "text": true
+        }
+      ]
+    },
+    {
+      "name": "deliverable",
+      "displayName": "Livrable CPV",
+      "description": "Livrable CPV : nom de la réunion",
+      "kind": "Grouping",
+      "preferredTypes": [
+        {
+          "text": true
+        }
+      ]
+    },
+    {
+      "name": "start",
+      "displayName": "Début",
+      "description": "Date de début de la réunion",
+      "kind": "Grouping"
+    },
+    {
+      "name": "end",
+      "displayName": "Fin",
+      "description": "Date de fin de la réunion",
+      "kind": "Grouping"
+    },
+    {
+      "name": "milestone",
+      "displayName": "Jalons",
+      "description": "Date du jalon (deadline)",
+      "kind": "Grouping"
+    },
+    {
+      "name": "progress",
+      "displayName": "Progress",
+      "description": "Avancement (0-1 ou 0-100)",
+      "kind": "Grouping",
+      "preferredTypes": [
+        {
+          "numeric": true
+        }
+      ]
+    },
+    {
+      "name": "siteOrder",
+      "displayName": "Ordre Site",
+      "description": "Rang du site (tri croissant)",
+      "kind": "Grouping",
+      "preferredTypes": [
+        {
+          "numeric": true
+        }
+      ]
+    }
+  ],
+  "dataViewMappings": [
+    {
+      "conditions": [
+        {
+          "site": {
+            "max": 1
+          },
+          "product": {
+            "max": 1
+          },
+          "deliverable": {
+            "max": 1
+          },
+          "start": {
+            "max": 1
+          },
+          "end": {
+            "max": 1
+          },
+          "milestone": {
+            "max": 1
+          },
+          "progress": {
+            "max": 1
+          },
+          "siteOrder": {
+            "max": 1
+          }
+        }
+      ],
+      "table": {
+        "rows": {
+          "select": [
+            {
+              "for": {
+                "in": "site"
+              }
+            },
+            {
+              "for": {
+                "in": "product"
+              }
+            },
+            {
+              "for": {
+                "in": "deliverable"
+              }
+            },
+            {
+              "for": {
+                "in": "start"
+              }
+            },
+            {
+              "for": {
+                "in": "end"
+              }
+            },
+            {
+              "for": {
+                "in": "milestone"
+              }
+            },
+            {
+              "for": {
+                "in": "progress"
+              }
+            },
+            {
+              "for": {
+                "in": "siteOrder"
+              }
+            }
+          ],
+          "dataReductionAlgorithm": {
+            "window": {
+              "count": 30000
+            }
+          }
+        }
+      }
+    }
+  ],
+  "objects": {
+    "layout": {
+      "properties": {
+        "rowHeight": {
+          "type": {
+            "numeric": true
+          }
+        },
+        "barHeightPercent": {
+          "type": {
+            "numeric": true
+          }
+        },
+        "gridWidth": {
+          "type": {
+            "numeric": true
+          }
+        }
+      }
+    },
+    "milestones": {
+      "properties": {
+        "size": {
+          "type": {
+            "numeric": true
+          }
+        },
+        "fill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "stroke": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "lineColor": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "siteColors": {
+      "properties": {
+        "lilleTrack": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "lilleFill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "ulisTrack": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "ulisFill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette1Track": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette1Fill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette2Track": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette2Fill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette3Track": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette3Fill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette4Track": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette4Fill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette5Track": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette5Fill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette6Track": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "palette6Fill": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "trackOpacity": {
+          "type": {
+            "numeric": true
+          }
+        }
+      }
+    },
+    "progress": {
+      "properties": {
+        "scale": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "0-1",
+                "displayName": "0 - 1"
+              },
+              {
+                "value": "0-100",
+                "displayName": "0 - 100"
+              }
+            ]
+          }
+        },
+        "showLabel": {
+          "type": {
+            "bool": true
+          }
+        }
+      }
+    },
+    "labels": {
+      "properties": {
+        "show": {
+          "type": {
+            "bool": true
+          }
+        },
+        "position": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "insideLeft",
+                "displayName": "Intérieur gauche"
+              },
+              {
+                "value": "above",
+                "displayName": "Au-dessus"
+              }
+            ]
+          }
+        },
+        "fontFamily": {
+          "type": {
+            "formatting": {
+              "fontFamily": true
+            }
+          }
+        },
+        "fontSize": {
+          "type": {
+            "formatting": {
+              "fontSize": true
+            }
+          }
+        },
+        "color": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "grid": {
+      "properties": {
+        "fontFamily": {
+          "type": {
+            "formatting": {
+              "fontFamily": true
+            }
+          }
+        },
+        "fontSize": {
+          "type": {
+            "formatting": {
+              "fontSize": true
+            }
+          }
+        },
+        "textColor": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "siteBackground": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "timeline": {
+      "properties": {
+        "yearBackground": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "yearTextColor": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "monthBackground": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "monthTextColor": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "gridLineColor": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "dateFormat": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "DD-MM-YYYY",
+                "displayName": "JJ-MM-AAAA"
+              },
+              {
+                "value": "DD/MM/YYYY",
+                "displayName": "JJ/MM/AAAA"
+              },
+              {
+                "value": "YYYY-MM-DD",
+                "displayName": "AAAA-MM-JJ"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "supportsHighlight": false,
+  "supportsMultiVisualSelection": true,
+  "supportsLandingPage": false,
+  "supportsKeyboardFocus": false,
+  "tooltips": {
+    "supportedTypes": {
+      "default": true,
+      "canvas": true
+    },
+    "roles": []
+  },
+  "privileges": []
+}

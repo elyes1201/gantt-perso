@@ -1,0 +1,29 @@
+{
+  "name": "gantt-pqr",
+  "version": "1.0.0.0",
+  "description": "Visuel Power BI Gantt PQR (sites > produits > réunions)",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "pbiviz": "pbiviz",
+    "start": "pbiviz start",
+    "package": "pbiviz package --no-minify",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "d3-scale": "4.0.2",
+    "d3-selection": "3.0.0",
+    "d3-time": "3.1.0",
+    "d3-time-format": "4.1.0",
+    "powerbi-visuals-api": "5.11.1",
+    "powerbi-visuals-utils-formattingmodel": "7.1.0"
+  },
+  "devDependencies": {
+    "@types/d3-scale": "4.0.9",
+    "@types/d3-selection": "3.0.12",
+    "@types/d3-time": "3.0.4",
+    "@types/d3-time-format": "4.0.3",
+    "powerbi-visuals-tools": "7.2.1",
+    "typescript": "5.9.3"
+  }
+}

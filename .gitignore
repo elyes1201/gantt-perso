@@ -1,0 +1,13 @@
+node_modules/
+.tmp/
+webpack.statistics.*.html
+*.log
+.vscode/
+.idea/
+.DS_Store
+.env
+.env.*
+certs/
+*.pem
+*.key
+dist/resources/

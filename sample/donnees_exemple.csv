@@ -1,0 +1,12 @@
+Site;Produit;Livrable CPV;Début;Fin;Jalons;Progress;Ordre Site
+Lille;Produit Alpha;Réunion de lancement CPV;2026-01-05;2026-02-13;2026-03-02;1;2
+Lille;Produit Alpha;Revue intermédiaire CPV avec un nom très long pour tester la troncature;2026-04-06;2026-06-12;2026-06-30;0.45;2
+Lille;  Produit Gamma  ;  Revue annuelle  ;2026-02-02;2026-05-29;2026-04-15;0.6;2
+Lille;Produit Beta;Clôture CPV;2026-03-09;2026-07-31;;0.2;2
+Ulis;Produit Alpha;Lancement site Ulis;2026-01-12;2026-03-27;2026-04-10;0.8;1
+Ulis;Produit Delta;Revue qualité;2026-05-04;2026-09-25;2026-10-09;0.3;1
+Ulis;Produit Delta;Revue finale;2026-10-12;2026-12-18;2026-12-04;0;1
+Site Zeta;Produit Epsilon;Réunion de suivi;2026-02-16;2026-08-14;2026-08-31;0.5;3
+Site Alpha;Produit Omega;Réunion de cadrage;2026-06-01;2026-11-27;2026-12-15;0.75;4
+Site Alpha;Produit Omega;Ligne ignorée (Fin vide);2026-06-01;;2026-12-15;0.75;4
+Site Alpha;Produit Omega;Ligne ignorée (Début invalide);pas une date;2026-11-27;;0.1;4
