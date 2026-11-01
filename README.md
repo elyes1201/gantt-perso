@@ -4,7 +4,7 @@ Diagramme de Gantt **Site > Produit > Réunions (Livrable CPV)** avec progressio
 Construit avec `pbiviz` (powerbi-visuals-tools), TypeScript et des modules D3 minimaux
 (`d3-selection`, `d3-scale`, `d3-time`, `d3-time-format`).
 
-- Livrable : `dist/ganttPQR4F1C2B7E9A3D45C8B6E0D1A2F3C4B5D6.1.0.0.0.pbiviz`
+- Livrable : `dist/ganttPQR4F1C2B7E9A3D45C8B6E0D1A2F3C4B5D6.1.1.0.0.pbiviz`
 - Données d'exemple (fictives) : `sample/donnees_exemple.csv`
 
 ## Fonctionnalités

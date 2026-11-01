@@ -1,5 +1,5 @@
 {
-		"version": "1.0.0.0",
+		"version": "1.1.0.0",
 		"author": {"name":"Gantt PQR","email":"noreply@example.com"},
 		"resources": [
 			{
@@ -8,7 +8,7 @@
 				"file": "resources/ganttPQR4F1C2B7E9A3D45C8B6E0D1A2F3C4B5D6.pbiviz.json"
 			}
 		],
-		"visual": {"name":"ganttPQR","displayName":"Gantt PQR","guid":"ganttPQR4F1C2B7E9A3D45C8B6E0D1A2F3C4B5D6","visualClassName":"Visual","version":"1.0.0.0","description":"Diagramme de Gantt Site > Produit > Réunions (Livrable CPV) avec progression et jalons.","supportUrl":"https://github.com/elyes1201/gantt-perso","gitHubUrl":"https://github.com/elyes1201/gantt-perso"},
+		"visual": {"name":"ganttPQR","displayName":"Gantt PQR","guid":"ganttPQR4F1C2B7E9A3D45C8B6E0D1A2F3C4B5D6","visualClassName":"Visual","version":"1.1.0.0","description":"Diagramme de Gantt Site > Produit > Réunions (Livrable CPV) avec progression et jalons.","supportUrl":"https://github.com/elyes1201/gantt-perso","gitHubUrl":"https://github.com/elyes1201/gantt-perso"},
 		"metadata": {
 			"pbivizjson": {
 				"resourceId": "rId0"
