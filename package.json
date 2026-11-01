@@ -1,6 +1,6 @@
 {
   "name": "gantt-pqr",
-  "version": "1.1.0.0",
+  "version": "1.2.0.0",
   "description": "Visuel Power BI Gantt PQR (sites > produits > réunions)",
   "private": true,
   "license": "MIT",

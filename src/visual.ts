@@ -27,8 +27,8 @@ import DataView = powerbi.DataView;
 
 import { VisualFormattingSettingsModel } from "./settings";
 import {
-    Meeting, GanttRow, ProductRow, SiteRow, MeetingRow, RawColumns, DisplayMode,
-    buildMeetings, buildRows, allGroupKeys, dateExtent, formatDate, formatPercent,
+    Meeting, GanttRow, GroupRow, MeetingRow, RawColumns, DisplayMode, HierarchyOrder,
+    buildMeetings, buildRows, groupKeysAtDepth, parseHierarchyOrder, sortSites, dateExtent, formatDate, formatPercent,
     freeLabelInterval, truncateText, splitColor
 } from "./dataModel";
 import { TimeLevel, resolveHierarchy, milestonePath } from "./timeLevels";
@@ -108,6 +108,10 @@ export class Visual implements IVisual {
     private renderScheduled = false;
     private syncingScroll = false;
     private displayMode: DisplayMode = "rows";
+    private hierarchyOrder: HierarchyOrder = "site-product";
+    /** Sites triés par Ordre Site (couleurs, panneau). */
+    private siteList: string[] = [];
+    private todayG: AnySelection;
     /** Couleurs par site choisies dans le panneau intégré : site -> {track, fill}. */
     private siteOverrides: Record<string, { track?: string; fill?: string }> = {};
     /** Choix du panneau pas encore renvoyés par l'hôte ("objet.propriété" -> valeur). */
@@ -169,6 +173,7 @@ export class Visual implements IVisual {
         this.bgRect = this.bodySvg.append("rect").attr("class", "bg").attr("x", 0).attr("y", 0).attr("fill", "transparent");
         this.gridLinesG = this.bodySvg.append("g").attr("class", "gridlines");
         this.rowsG = this.bodySvg.append("g").attr("class", "rows");
+        this.todayG = this.bodySvg.append("g").attr("class", "today").style("pointer-events", "none");
 
         this.emptyMsg = this.div("gantt-empty", this.root);
         this.emptyMsg.textContent = "Aucune donnée valide : ajoutez Site, Produit, Début et Fin.";
@@ -295,6 +300,7 @@ export class Visual implements IVisual {
         } as DataView;
         this.settings = this.formattingSettingsService.populateFormattingSettingsModel(VisualFormattingSettingsModel, patched);
         this.displayMode = String(this.settings.layout.displayMode.value?.value) === "compact" ? "compact" : "rows";
+        this.hierarchyOrder = parseHierarchyOrder(this.settings.layout.hierarchyOrder.value?.value);
         this.siteOverrides = this.parseSiteOverrides(objects);
 
         const settingsGridW = this.settings.layout.gridWidth.value;
@@ -409,11 +415,17 @@ export class Visual implements IVisual {
 
     private panelState(): PanelState {
         const st = this.settings;
-        const sites = this.rows.filter(r => r.kind === "site").map(r => {
-            const c = this.colorOf(r.site);
-            return { site: r.site, track: c.track, fill: c.fill, custom: !!this.siteOverrides[r.site] };
+        const sites = this.siteList.map(site => {
+            const c = this.colorOf(site);
+            return { site, track: c.track, fill: c.fill, custom: !!this.siteOverrides[site] };
         });
         return {
+            hierarchyOrder: this.hierarchyOrder,
+            showSiteBar: st.layout.showSiteBar.value,
+            showProductBar: st.layout.showProductBar.value,
+            showToday: st.timeline.showToday.value,
+            todayColor: toInputColor(st.timeline.todayColor.value.value),
+            todayWidth: st.timeline.todayWidth.value,
             displayMode: this.displayMode,
             hierarchy: String(st.timeline.hierarchy.value?.value ?? "year-month"),
             rowHeight: this.rowHeight(),
@@ -433,12 +445,13 @@ export class Visual implements IVisual {
     private expandAll(expand: boolean): void {
         this.collapsed.clear();
         if (!expand) {
-            // Mode "rows" : replie au niveau Produit (sites visibles) ; mode compact : replie les sites.
-            const keys = allGroupKeys(this.meetings, this.displayMode);
-            const productLevel = this.displayMode === "rows";
-            keys.filter(k => productLevel ? k.startsWith("P|") : k.startsWith("S|")).forEach(k => this.collapsed.add(k));
+            // Mode "rows" : replie le dernier niveau de regroupement (parents visibles) ; compact : le premier.
+            const levels = this.hierarchyOrder.split("-").length;
+            const depth = this.displayMode === "rows" ? levels - 1 : 0;
+            groupKeysAtDepth(this.meetings, this.siteOrder, this.siteFirstSeen, this.displayMode, this.hierarchyOrder, depth)
+                .forEach(k => this.collapsed.add(k));
         }
-        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode);
+        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode, this.hierarchyOrder);
         this.render();
     }
 
@@ -448,7 +461,7 @@ export class Visual implements IVisual {
         } else {
             this.collapsed.add(key);
         }
-        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode);
+        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode, this.hierarchyOrder);
         this.render();
     }
 
@@ -477,7 +490,8 @@ export class Visual implements IVisual {
         this.meetings = res.meetings;
         this.siteOrder = res.siteOrder;
         this.siteFirstSeen = res.siteFirstSeen;
-        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode);
+        this.siteList = sortSites(Array.from(new Set(this.meetings.map(m => m.site))), this.siteOrder, this.siteFirstSeen);
+        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode, this.hierarchyOrder);
 
         const ext = dateExtent(this.meetings);
         const key = ext ? ext[0].getTime() + "|" + ext[1].getTime() : "";
@@ -546,7 +560,7 @@ export class Visual implements IVisual {
             fillHex = sc.ulisFill.value.value;
         } else {
             // Index stable : rang du site parmi les "autres sites" dans l'ordre d'affichage.
-            const others = this.rows.filter(r => r.kind === "site" && !["lille", "ulis", "les ulis"].includes(r.site.trim().toLowerCase())).map(r => r.site);
+            const others = this.siteList.filter(x => !["lille", "ulis", "les ulis"].includes(x.trim().toLowerCase()));
             const idx = Math.max(0, others.indexOf(site)) % sc.palette.length;
             trackHex = sc.palette[idx][0].value.value;
             fillHex = sc.palette[idx][1].value.value;
@@ -674,6 +688,7 @@ export class Visual implements IVisual {
             this.rowsG.selectAll("*").remove();
             this.headerSvg.selectAll("*").remove();
             this.gridLinesG.selectAll("*").remove();
+            this.todayG.selectAll("*").remove();
             return;
         }
         this.layout();
@@ -691,6 +706,7 @@ export class Visual implements IVisual {
 
         this.renderHeader();
         this.renderGridLines(bodyH);
+        this.renderToday(bodyH);
         if (scrollRender) {
             this.renderVisibleRows();
         }
@@ -783,7 +799,42 @@ export class Visual implements IVisual {
         drawLevel(bottom, HEADER_ROW_H, "level-bottom", tl.monthTextColor.value.value, 10, "400");
 
         svg.append("line").attr("x1", 0).attr("x2", w).attr("y1", HEADER_H - 0.5).attr("y2", HEADER_H - 0.5).attr("stroke", "#d0d0d0");
+
+        // Repère « Aujourd'hui » dans l'en-tête
+        const tx = this.todayX();
+        if (tx !== null) {
+            const color = tl.todayColor.value.value;
+            const tg = svg.append("g").attr("class", "today-marker");
+            tg.append("line").attr("x1", tx).attr("x2", tx).attr("y1", HEADER_ROW_H).attr("y2", HEADER_H)
+                .attr("stroke", color).attr("stroke-width", Math.max(1, Math.min(6, tl.todayWidth.value || 2)));
+            tg.append("path").attr("d", `M${tx - 5},${HEADER_H - 7}L${tx + 5},${HEADER_H - 7}L${tx},${HEADER_H}Z`).attr("fill", color);
+            tg.append("title").text("Aujourd'hui");
+        }
         svg.append("line").attr("x1", 0).attr("x2", w).attr("y1", HEADER_ROW_H - 0.5).attr("y2", HEADER_ROW_H - 0.5).attr("stroke", "#e0e0e0");
+    }
+
+    /** Position x de la date du jour, ou null si masquée / hors de la plage affichée. */
+    private todayX(): number | null {
+        if (!this.settings.timeline.showToday.value || !this.extent) {
+            return null;
+        }
+        const now = new Date();
+        const x = this.x(now);
+        return x >= 0 && x <= this.contentWidth ? x : null;
+    }
+
+    /** Ligne verticale « Aujourd'hui » au-dessus des barres. */
+    private renderToday(height: number): void {
+        const x = this.todayX();
+        const data = x === null ? [] : [x];
+        const color = this.settings.timeline.todayColor.value.value;
+        const width = Math.max(1, Math.min(6, this.settings.timeline.todayWidth.value || 2));
+        const sel = this.todayG.selectAll<SVGLineElement, number>("line").data(data);
+        sel.exit().remove();
+        sel.enter().append("line").merge(sel)
+            .attr("x1", d => d).attr("x2", d => d)
+            .attr("y1", 0).attr("y2", Math.max(height, this.tlBody.clientHeight))
+            .attr("stroke", color).attr("stroke-width", width);
     }
 
     private renderGridLines(height: number): void {
@@ -830,14 +881,14 @@ export class Visual implements IVisual {
 
         const all = enter.merge(sel);
         all.attr("transform", d => `translate(0,${d.index * rh})`)
-            .classed("site", d => d.row.kind === "site")
-            .classed("product", d => d.row.kind === "product")
-            .classed("meeting-row", d => d.row.kind === "meeting")
+            .attr("class", d => d.row.kind === "group"
+                ? `grow group depth-${d.row.depth} field-${d.row.field}`
+                : "grow meeting-row")
             .style("cursor", "pointer")
             .style("opacity", d => this.rowOpacity(d.row));
         all.select("rect.grow-bg")
             .attr("width", gw).attr("height", rh)
-            .attr("fill", d => d.row.kind === "site" ? siteBg : "transparent");
+            .attr("fill", d => this.isTopGroup(d.row) ? siteBg : "transparent");
         all.select("line.grow-sep")
             .attr("x1", 0).attr("x2", gw).attr("y1", rh - 0.5).attr("y2", rh - 0.5).attr("stroke", "#ececec");
         all.select("text.grow-text")
@@ -846,7 +897,7 @@ export class Visual implements IVisual {
             .attr("fill", textColor)
             .style("font-size", fontSize + "px")
             .style("font-family", fontFamily)
-            .style("font-weight", d => d.row.kind === "site" ? "600" : d.row.kind === "product" && this.displayMode === "rows" ? "500" : "400")
+            .style("font-weight", d => this.isTopGroup(d.row) ? "600" : d.row.kind === "group" && !(d.row.leaf && this.displayMode === "compact") ? "500" : "400")
             .style("fill-opacity", d => d.row.kind === "meeting" ? 0.85 : 1)
             .text(d => {
                 const avail = gw - this.gridIndent(d.row) - 6;
@@ -855,18 +906,19 @@ export class Visual implements IVisual {
         all.select("title").text(d => this.gridLabel(d.row, false));
     }
 
-    /** Retrait horizontal du libellé selon le niveau (Site > Produit > Réunion). */
+    private isTopGroup(row: GanttRow): boolean {
+        return row.kind === "group" && row.depth === 0;
+    }
+
+    /** Retrait horizontal du libellé selon la profondeur dans la hiérarchie. */
     private gridIndent(row: GanttRow): number {
-        return row.kind === "site" ? 6 : row.kind === "product" ? 20 : 40;
+        return 6 + row.depth * 16 + (row.kind === "meeting" ? 4 : 0);
     }
 
     private gridLabel(row: GanttRow, withChevron = true): string {
-        if (row.kind === "site") {
-            return (withChevron ? (row.collapsed ? "▸ " : "▾ ") : "") + row.site;
-        }
-        if (row.kind === "product") {
+        if (row.kind === "group") {
             const chevron = withChevron && row.collapsible ? (row.collapsed ? "▸ " : "▾ ") : "";
-            return chevron + row.product;
+            return chevron + row.label;
         }
         return row.meeting.deliverable || "(Sans nom)";
     }
@@ -894,8 +946,8 @@ export class Visual implements IVisual {
         const all = enter.merge(sel);
         all.attr("transform", d => `translate(0,${d.index * rh})`);
         all.select("rect.trow-bg").attr("width", w).attr("height", rh)
-            .attr("fill", d => d.row.kind === "site" ? siteBg : "transparent")
-            .attr("fill-opacity", d => d.row.kind === "site" ? 0.6 : 0);
+            .attr("fill", d => this.isTopGroup(d.row) ? siteBg : "transparent")
+            .attr("fill-opacity", d => this.isTopGroup(d.row) ? 0.6 : 0);
         all.select("line.trow-sep").attr("x1", 0).attr("x2", w).attr("y1", rh - 0.5).attr("y2", rh - 0.5).attr("stroke", "#f2f2f2");
 
         const self = this;
@@ -923,22 +975,23 @@ export class Visual implements IVisual {
         const labels = g.select("g.layer-labels");
         const milestones = g.select("g.layer-milestones");
 
-        const summaryOnly = row.kind === "site" || (row.kind === "product" && row.collapsible && !row.collapsed);
+        // Groupe : barre de synthèse, sauf dernier niveau replié (ou compact) où l'on dessine les réunions.
+        const summaryOnly = row.kind === "group" && !(row.leaf && (row.collapsed || this.displayMode === "compact"));
         if (summaryOnly) {
-            // Barre de synthèse fine (étendue du site ou du produit)
-            const span = row as SiteRow | ProductRow;
-            const data = span.start && span.end ? [span] : [];
-            const c = this.colorOf(row.site);
-            const thick = row.kind === "site" ? 4 : 6;
+            const grp = row as GroupRow;
+            const barOn = grp.field === "site" ? this.settings.layout.showSiteBar.value : this.settings.layout.showProductBar.value;
+            const data = barOn && grp.start && grp.end ? [grp] : [];
+            const fillColor = grp.site !== null ? this.colorOf(grp.site).fill : "#8c8c8c";
+            const thick = grp.depth === 0 ? 4 : 6;
             tracks.selectAll("g.meeting").remove();
-            const s = tracks.selectAll<SVGRectElement, SiteRow | ProductRow>("rect.summary").data(data);
+            const s = tracks.selectAll<SVGRectElement, GroupRow>("rect.summary").data(data);
             s.exit().remove();
             s.enter().append("rect").attr("class", "summary").merge(s)
                 .attr("x", d => this.x(d.start))
                 .attr("width", d => Math.max(2, this.x(d.end) - this.x(d.start)))
                 .attr("y", rh / 2 - thick / 2).attr("height", thick).attr("rx", thick / 2)
-                .attr("fill", c.fill).attr("fill-opacity", row.kind === "site" ? 0.45 : 0.3)
-                .style("opacity", row.kind === "product" ? this.rowOpacity(row) : 1);
+                .attr("fill", fillColor).attr("fill-opacity", grp.depth === 0 ? 0.45 : 0.3)
+                .style("opacity", this.rowOpacity(grp));
             lines.selectAll("*").remove();
             labels.selectAll("*").remove();
             milestones.selectAll("*").remove();
@@ -949,7 +1002,7 @@ export class Visual implements IVisual {
         // Position verticale de la barre
         const barTop = above ? Math.max(0, rh - bh - 2) : Math.round((rh - bh) / 2);
         const cy = barTop + bh / 2;
-        const meetings = row.kind === "meeting" ? [(row as MeetingRow).meeting] : (row as ProductRow).meetings;
+        const meetings = row.kind === "meeting" ? [(row as MeetingRow).meeting] : (row as GroupRow).meetings;
         const geo = meetings.map(m => {
             const x0 = this.x(m.start);
             const x1 = Math.max(x0 + 2, this.x(m.end));
@@ -1114,7 +1167,7 @@ export class Visual implements IVisual {
         if (this.selectedRows.size === 0) {
             return 1;
         }
-        if (row.kind === "site") {
+        if (this.isTopGroup(row)) {
             return 1;
         }
         if (row.kind === "meeting") {
@@ -1199,12 +1252,11 @@ export class Visual implements IVisual {
                 return;
             }
             const multi = e.ctrlKey || e.metaKey;
-            if (row.kind === "site") {
-                this.toggleGroup(row.key);
-            } else if (row.kind === "product") {
-                // Clic sur le chevron : replier / déplier ; clic sur le nom : sélectionner ses réunions.
+            if (row.kind === "group") {
+                // Premier niveau : clic = replier / déplier.
+                // Niveaux suivants : clic sur le chevron = replier / déplier ; clic sur le nom = sélectionner.
                 const xIn = e.clientX - this.gridBody.getBoundingClientRect().left;
-                if (row.collapsible && xIn < this.gridIndent(row) + 14) {
+                if (row.collapsible && (row.depth === 0 || xIn < this.gridIndent(row) + 14)) {
                     this.toggleGroup(row.key);
                 } else {
                     this.applySelection(row.meetings.map(m => m.selectionId), multi);
@@ -1215,14 +1267,14 @@ export class Visual implements IVisual {
         });
         this.gridBody.addEventListener("dblclick", (e: MouseEvent) => {
             const row = this.rowFromGridEvent(e);
-            if (row && row.kind === "product" && row.collapsible) {
+            if (row && row.kind === "group" && row.depth > 0 && row.collapsible) {
                 this.toggleGroup(row.key);
             }
         });
         this.gridBody.addEventListener("contextmenu", (e: MouseEvent) => {
             const row = this.rowFromGridEvent(e);
             const id = row && row.kind === "meeting" ? row.meeting.selectionId
-                : row && row.kind === "product" && row.meetings.length ? row.meetings[0].selectionId : ({} as ISelectionId);
+                : row && row.kind === "group" && row.meetings.length ? row.meetings[0].selectionId : ({} as ISelectionId);
             this.selectionManager.showContextMenu(id, { x: e.clientX, y: e.clientY });
             e.preventDefault();
         });

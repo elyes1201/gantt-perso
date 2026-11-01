@@ -4,12 +4,13 @@ Diagramme de Gantt **Site > Produit > Réunions (Livrable CPV)** avec progressio
 Construit avec `pbiviz` (powerbi-visuals-tools), TypeScript et des modules D3 minimaux
 (`d3-selection`, `d3-scale`, `d3-time`, `d3-time-format`).
 
-- Livrable : `dist/ganttPQR4F1C2B7E9A3D45C8B6E0D1A2F3C4B5D6.1.1.0.0.pbiviz`
+- Livrable : `dist/ganttPQR4F1C2B7E9A3D45C8B6E0D1A2F3C4B5D6.1.2.0.0.pbiviz`
 - Données d'exemple (fictives) : `sample/donnees_exemple.csv`
 
 ## Fonctionnalités
 
-- Hiérarchie **Site > Produit > Réunion** (une barre par ligne), sites et produits repliables
+- Niveaux du bandeau gauche au choix : **Site > Produit > Réunion** (défaut), Produit > Site > Réunion,
+  Site > Réunion, Produit > Réunion (une barre par ligne), groupes repliables
   (chevron ▸/▾, double-clic, boutons ⊞ « Tout déplier » / ⊟ « Tout replier »).
   Mode « Compact » disponible (réunions sur la ligne Produit).
 - Bouton **⚙** : panneau de paramétrage dans le visuel (mode d'affichage, hiérarchie de dates,
@@ -18,6 +19,8 @@ Construit avec `pbiviz` (powerbi-visuals-tools), TypeScript et des modules D3 mi
   En mode lecture du service, ils ne s'appliquent qu'à la session en cours.
 - Hiérarchie de dates : Automatique, Année > Trimestre, Année > Mois (défaut), Trimestre > Mois,
   Mois > Semaine (lundi), Mois > Jour, Semaine > Jour.
+- Barres de synthèse des Sites / des Produits masquables séparément.
+- Ligne **« Aujourd'hui »** (rouge par défaut) : affichage, couleur et épaisseur réglables.
 - Symboles de jalon : losange (défaut), cercle, carré, triangle, étoile, drapeau.
 
 ## Construire

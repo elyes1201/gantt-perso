@@ -7,6 +7,7 @@
 import powerbi from "powerbi-visuals-api";
 import { formattingSettings } from "powerbi-visuals-utils-formattingmodel";
 import { HIERARCHIES, MILESTONE_SHAPES } from "./timeLevels";
+import { HIERARCHY_ORDERS } from "./dataModel";
 
 import FormattingSettingsCard = formattingSettings.SimpleCard;
 import FormattingSettingsSlice = formattingSettings.Slice;
@@ -33,8 +34,13 @@ export const DISPLAY_MODES: powerbi.IEnumMember[] = [
     { value: "compact", displayName: "Compact (réunions sur la ligne Produit)" }
 ];
 
-/** Disposition : mode d'affichage, hauteur de ligne, hauteur de barre, largeur de la grille. */
+export const ORDER_ITEMS: powerbi.IEnumMember[] = HIERARCHY_ORDERS.map(h => ({ value: h.value, displayName: h.displayName }));
+
+/** Disposition : niveaux, mode d'affichage, barres de synthèse, hauteurs, largeur de la grille. */
 export class LayoutCard extends FormattingSettingsCard {
+    hierarchyOrder = new formattingSettings.ItemDropdown({ name: "hierarchyOrder", displayName: "Niveaux du bandeau gauche", items: ORDER_ITEMS, value: ORDER_ITEMS[0] });
+    showSiteBar = new formattingSettings.ToggleSwitch({ name: "showSiteBar", displayName: "Barre de synthèse des Sites", value: true });
+    showProductBar = new formattingSettings.ToggleSwitch({ name: "showProductBar", displayName: "Barre de synthèse des Produits", value: true });
     displayMode = new formattingSettings.ItemDropdown({ name: "displayMode", displayName: "Mode d'affichage", items: DISPLAY_MODES, value: DISPLAY_MODES[0] });
     rowHeight = num("rowHeight", "Hauteur de ligne (px)", 30, 16, 80);
     barHeightPercent = num("barHeightPercent", "Hauteur de barre (% de la ligne)", 60, 10, 100);
@@ -43,7 +49,7 @@ export class LayoutCard extends FormattingSettingsCard {
 
     name = "layout";
     displayName = "Disposition";
-    slices: FormattingSettingsSlice[] = [this.displayMode, this.rowHeight, this.barHeightPercent, this.gridWidth, this.showSettingsButton];
+    slices: FormattingSettingsSlice[] = [this.hierarchyOrder, this.displayMode, this.showSiteBar, this.showProductBar, this.rowHeight, this.barHeightPercent, this.gridWidth, this.showSettingsButton];
 }
 
 export const SHAPE_ITEMS: powerbi.IEnumMember[] = MILESTONE_SHAPES.map(s => ({ value: s.value, displayName: s.displayName }));
@@ -162,11 +168,14 @@ export class TimelineCard extends FormattingSettingsCard {
     monthBackground = color("monthBackground", "Fond - niveau bas", "#f7f9fb");
     monthTextColor = color("monthTextColor", "Texte - niveau bas", "#555555");
     gridLineColor = color("gridLineColor", "Lignes de grille", "#e6e6e6");
+    showToday = new formattingSettings.ToggleSwitch({ name: "showToday", displayName: "Ligne « Aujourd'hui »", value: true });
+    todayColor = color("todayColor", "Couleur de la ligne Aujourd'hui", "#e81123");
+    todayWidth = num("todayWidth", "Épaisseur de la ligne Aujourd'hui (px)", 2, 1, 6);
     dateFormat = new formattingSettings.ItemDropdown({ name: "dateFormat", displayName: "Format de date (infobulles)", items: dateFormatItems, value: dateFormatItems[0] });
 
     name = "timeline";
     displayName = "Timeline";
-    slices: FormattingSettingsSlice[] = [this.hierarchy, this.yearBackground, this.yearTextColor, this.monthBackground, this.monthTextColor, this.gridLineColor, this.dateFormat];
+    slices: FormattingSettingsSlice[] = [this.hierarchy, this.yearBackground, this.yearTextColor, this.monthBackground, this.monthTextColor, this.gridLineColor, this.showToday, this.todayColor, this.todayWidth, this.dateFormat];
 }
 
 export class VisualFormattingSettingsModel extends FormattingSettingsModel {

@@ -20,24 +20,40 @@ export interface Meeting {
     selectionId?: any;
 }
 
-export interface SiteRow {
-    kind: "site";
-    key: string;
-    site: string;
-    order: number;
-    collapsed: boolean;
-    start: Date | null;
-    end: Date | null;
-    productCount: number;
+export type GroupField = "site" | "product";
+
+/**
+ * Ordre des niveaux du bandeau de gauche (au-dessus des réunions) :
+ * "site-product" (défaut), "product-site", "site" ou "product".
+ */
+export type HierarchyOrder = "site-product" | "product-site" | "site" | "product";
+
+export const HIERARCHY_ORDERS: Array<{ value: HierarchyOrder; displayName: string }> = [
+    { value: "site-product", displayName: "Site > Produit > Réunion" },
+    { value: "product-site", displayName: "Produit > Site > Réunion" },
+    { value: "site", displayName: "Site > Réunion" },
+    { value: "product", displayName: "Produit > Réunion" }
+];
+
+export function parseHierarchyOrder(value: unknown): HierarchyOrder {
+    const v = String(value);
+    return HIERARCHY_ORDERS.some(h => h.value === v) ? v as HierarchyOrder : "site-product";
 }
 
-export interface ProductRow {
-    kind: "product";
+/** Ligne de regroupement (Site ou Produit, à n'importe quel niveau). */
+export interface GroupRow {
+    kind: "group";
     key: string;
-    site: string;
-    product: string;
+    /** 0 = premier parent. */
+    depth: number;
+    field: GroupField;
+    label: string;
+    /** Site commun à toutes les réunions du groupe (couleur), sinon null. */
+    site: string | null;
+    /** Toutes les réunions du groupe (descendants compris). */
     meetings: Meeting[];
-    /** Repliable uniquement en mode "rows" (réunions en lignes). */
+    /** Dernier niveau de regroupement (juste au-dessus des réunions). */
+    leaf: boolean;
     collapsible: boolean;
     collapsed: boolean;
     start: Date | null;
@@ -48,14 +64,13 @@ export interface ProductRow {
 export interface MeetingRow {
     kind: "meeting";
     key: string;
-    site: string;
-    product: string;
+    depth: number;
     meeting: Meeting;
 }
 
-export type GanttRow = SiteRow | ProductRow | MeetingRow;
+export type GanttRow = GroupRow | MeetingRow;
 
-/** "rows" : Site > Produit > Réunion (une barre par ligne) ; "compact" : réunions sur la ligne Produit. */
+/** "rows" : une barre par ligne ; "compact" : réunions sur la ligne du dernier regroupement. */
 export type DisplayMode = "rows" | "compact";
 
 export interface RawColumns {
@@ -216,15 +231,6 @@ export function buildMeetings(rows: unknown[][], cols: RawColumns, progressScale
     return { meetings, siteOrder, siteFirstSeen };
 }
 
-/** Clé de repli d'un site / d'un produit. */
-export function siteKey(site: string): string {
-    return "S|" + site;
-}
-
-export function productKey(site: string, product: string): string {
-    return "P|" + site + "|" + product;
-}
-
 function spanOf(list: Meeting[]): [Date | null, Date | null] {
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
@@ -235,29 +241,9 @@ function spanOf(list: Meeting[]): [Date | null, Date | null] {
     return [isFinite(min) ? new Date(min) : null, isFinite(max) ? new Date(max) : null];
 }
 
-/**
- * Regroupe en lignes : en-tête de Site, ligne Produit, puis (mode "rows") une ligne par réunion.
- * Sites : Ordre Site croissant (sans ordre -> à la fin, puis ordre d'apparition ; jamais alphabétique).
- * Produits : alphabétique dans chaque site. Réunions : par date de début, puis nom.
- * `collapsed` contient les clés (siteKey / productKey) des groupes repliés.
- */
-export function buildRows(meetings: Meeting[], siteOrder: Map<string, number>, siteFirstSeen: Map<string, number>, collapsed: Set<string>, mode: DisplayMode = "rows"): GanttRow[] {
-    const bySite = new Map<string, Map<string, Meeting[]>>();
-    for (const m of meetings) {
-        let products = bySite.get(m.site);
-        if (!products) {
-            products = new Map<string, Meeting[]>();
-            bySite.set(m.site, products);
-        }
-        let list = products.get(m.product);
-        if (!list) {
-            list = [];
-            products.set(m.product, list);
-        }
-        list.push(m);
-    }
-
-    const sites = Array.from(bySite.keys()).sort((a, b) => {
+/** Sites triés par Ordre Site croissant (sans ordre -> à la fin, puis ordre d'apparition ; jamais alphabétique). */
+export function sortSites(sites: string[], siteOrder: Map<string, number>, siteFirstSeen: Map<string, number>): string[] {
+    return sites.slice().sort((a, b) => {
         const oa = siteOrder.has(a) ? siteOrder.get(a) : Number.POSITIVE_INFINITY;
         const ob = siteOrder.has(b) ? siteOrder.get(b) : Number.POSITIVE_INFINITY;
         if (oa !== ob) {
@@ -265,58 +251,74 @@ export function buildRows(meetings: Meeting[], siteOrder: Map<string, number>, s
         }
         return (siteFirstSeen.get(a) ?? 0) - (siteFirstSeen.get(b) ?? 0);
     });
+}
 
+function compareMeetings(a: Meeting, b: Meeting): number {
+    return (a.start.getTime() - b.start.getTime()) || (a.end.getTime() - b.end.getTime()) || compareText(a.deliverable, b.deliverable);
+}
+
+/**
+ * Construit les lignes selon l'ordre des niveaux choisi, puis (mode "rows") une ligne par réunion.
+ * Sites : Ordre Site croissant ; Produits : alphabétique ; Réunions : par date de début.
+ * Un même produit présent sur deux sites apparaît sous chacun d'eux (et inversement).
+ * `collapsed` contient les clés des groupes repliés.
+ */
+export function buildRows(
+    meetings: Meeting[], siteOrder: Map<string, number>, siteFirstSeen: Map<string, number>,
+    collapsed: Set<string>, mode: DisplayMode = "rows", order: HierarchyOrder = "site-product"
+): GanttRow[] {
+    const levels = order.split("-") as GroupField[];
     const rows: GanttRow[] = [];
-    for (const site of sites) {
-        const products = bySite.get(site);
-        const names = Array.from(products.keys()).sort(compareText);
-        const all: Meeting[] = [];
-        products.forEach(list => list.forEach(m => all.push(m)));
-        const [sStart, sEnd] = spanOf(all);
-        const sKey = siteKey(site);
-        const siteCollapsed = collapsed.has(sKey);
-        rows.push({
-            kind: "site",
-            key: sKey,
-            site,
-            order: siteOrder.has(site) ? siteOrder.get(site) : NaN,
-            collapsed: siteCollapsed,
-            start: sStart,
-            end: sEnd,
-            productCount: names.length
-        });
-        if (siteCollapsed) {
-            continue;
+
+    const walk = (list: Meeting[], depth: number, parentKey: string, parentSite: string | null): void => {
+        const field = levels[depth];
+        const groups = new Map<string, Meeting[]>();
+        for (const m of list) {
+            const v = field === "site" ? m.site : m.product;
+            let g = groups.get(v);
+            if (!g) {
+                g = [];
+                groups.set(v, g);
+            }
+            g.push(m);
         }
-        for (const product of names) {
-            const list = products.get(product).slice().sort((a, b) =>
-                (a.start.getTime() - b.start.getTime()) || (a.end.getTime() - b.end.getTime()) || compareText(a.deliverable, b.deliverable));
-            const pKey = productKey(site, product);
-            const collapsible = mode === "rows";
-            const productCollapsed = collapsible && collapsed.has(pKey);
-            const [pStart, pEnd] = spanOf(list);
-            rows.push({ kind: "product", key: pKey, site, product, meetings: list, collapsible, collapsed: productCollapsed, start: pStart, end: pEnd });
-            if (!collapsible || productCollapsed) {
+        const keys = field === "site"
+            ? sortSites(Array.from(groups.keys()), siteOrder, siteFirstSeen)
+            : Array.from(groups.keys()).sort(compareText);
+        const leaf = depth === levels.length - 1;
+        for (const value of keys) {
+            const members = groups.get(value);
+            const key = parentKey + "|" + (field === "site" ? "S:" : "P:") + value;
+            let site = field === "site" ? value : parentSite;
+            if (site === null && members.every(m => m.site === members[0].site)) {
+                site = members[0].site;
+            }
+            const collapsible = !(leaf && mode === "compact");
+            const isCollapsed = collapsible && collapsed.has(key);
+            const [start, end] = spanOf(members);
+            const sorted = members.slice().sort(compareMeetings);
+            rows.push({ kind: "group", key, depth, field, label: value, site, meetings: sorted, leaf, collapsible, collapsed: isCollapsed, start, end });
+            if (isCollapsed || (leaf && mode === "compact")) {
                 continue;
             }
-            for (const m of list) {
-                rows.push({ kind: "meeting", key: "M|" + m.rowIndex, site, product, meeting: m });
+            if (leaf) {
+                for (const m of sorted) {
+                    rows.push({ kind: "meeting", key: "M|" + m.rowIndex, depth: depth + 1, meeting: m });
+                }
+            } else {
+                walk(members, depth + 1, key, field === "site" ? value : parentSite);
             }
         }
-    }
+    };
+    walk(meetings, 0, "G", null);
     return rows;
 }
 
-/** Toutes les clés de groupes repliables (pour "Tout replier"). */
-export function allGroupKeys(meetings: Meeting[], mode: DisplayMode): string[] {
-    const keys = new Set<string>();
-    for (const m of meetings) {
-        keys.add(siteKey(m.site));
-        if (mode === "rows") {
-            keys.add(productKey(m.site, m.product));
-        }
-    }
-    return Array.from(keys);
+/** Clés des groupes d'une profondeur donnée (pour "Tout replier"). */
+export function groupKeysAtDepth(meetings: Meeting[], siteOrder: Map<string, number>, siteFirstSeen: Map<string, number>, mode: DisplayMode, order: HierarchyOrder, depth: number): string[] {
+    return buildRows(meetings, siteOrder, siteFirstSeen, new Set<string>(), mode, order)
+        .filter(r => r.kind === "group" && r.depth === depth)
+        .map(r => r.key);
 }
 
 /** Plus petite et plus grande date (Début, Fin, Jalons) ; null si aucune réunion. */

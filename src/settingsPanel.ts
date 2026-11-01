@@ -8,6 +8,7 @@
 "use strict";
 
 import { HIERARCHIES, MILESTONE_SHAPES, milestonePath } from "./timeLevels";
+import { HIERARCHY_ORDERS } from "./dataModel";
 
 export interface Option {
     value: string;
@@ -22,6 +23,12 @@ export interface SiteColorState {
 }
 
 export interface PanelState {
+    hierarchyOrder: string;
+    showSiteBar: boolean;
+    showProductBar: boolean;
+    showToday: boolean;
+    todayColor: string;
+    todayWidth: number;
     displayMode: string;
     hierarchy: string;
     rowHeight: number;
@@ -151,11 +158,21 @@ export class SettingsPanel {
         }
         const cb = this.callbacks;
 
-        this.section("Affichage");
+        this.section("Hiérarchie");
+        this.select("Niveaux", HIERARCHY_ORDERS, s.hierarchyOrder, v => cb.onChange("layout", "hierarchyOrder", v));
         this.select("Mode", DISPLAY_MODES, s.displayMode, v => cb.onChange("layout", "displayMode", v));
+        this.checkbox("Barre de synthèse des Sites", s.showSiteBar, v => cb.onChange("layout", "showSiteBar", v));
+        this.checkbox("Barre de synthèse des Produits", s.showProductBar, v => cb.onChange("layout", "showProductBar", v));
+
+        this.section("Affichage");
         this.select("Hiérarchie de dates", HIERARCHIES, s.hierarchy, v => cb.onChange("timeline", "hierarchy", v));
         this.number("Hauteur de ligne (px)", s.rowHeight, 16, 80, 1, v => cb.onChange("layout", "rowHeight", v));
         this.range("Hauteur de barre (%)", s.barHeightPercent, 10, 100, 5, v => cb.onChange("layout", "barHeightPercent", v));
+
+        this.section("Aujourd'hui");
+        this.checkbox("Afficher la ligne « Aujourd'hui »", s.showToday, v => cb.onChange("timeline", "showToday", v));
+        this.color("Couleur", s.todayColor, v => cb.onChange("timeline", "todayColor", { solid: { color: v } }));
+        this.number("Épaisseur (px)", s.todayWidth, 1, 6, 1, v => cb.onChange("timeline", "todayWidth", v));
 
         this.section("Jalons");
         this.shapePicker(s.milestoneShape, s.milestoneFill, v => cb.onChange("milestones", "shape", v));

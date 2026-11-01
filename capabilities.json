@@ -193,6 +193,38 @@
           "type": {
             "bool": true
           }
+        },
+        "hierarchyOrder": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "site-product",
+                "displayName": "Site > Produit > Réunion"
+              },
+              {
+                "value": "product-site",
+                "displayName": "Produit > Site > Réunion"
+              },
+              {
+                "value": "site",
+                "displayName": "Site > Réunion"
+              },
+              {
+                "value": "product",
+                "displayName": "Produit > Réunion"
+              }
+            ]
+          }
+        },
+        "showSiteBar": {
+          "type": {
+            "bool": true
+          }
+        },
+        "showProductBar": {
+          "type": {
+            "bool": true
+          }
         }
       }
     },
@@ -622,6 +654,25 @@
                 "displayName": "Semaine > Jour"
               }
             ]
+          }
+        },
+        "showToday": {
+          "type": {
+            "bool": true
+          }
+        },
+        "todayColor": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "todayWidth": {
+          "type": {
+            "numeric": true
           }
         }
       }
