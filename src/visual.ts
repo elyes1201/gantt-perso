@@ -12,8 +12,6 @@ import powerbi from "powerbi-visuals-api";
 import { FormattingSettingsService } from "powerbi-visuals-utils-formattingmodel";
 import { select, Selection } from "d3-selection";
 import { scaleTime, ScaleTime } from "d3-scale";
-import { timeYear, timeMonth, timeMonday } from "d3-time";
-import { timeFormatLocale } from "d3-time-format";
 import "./../style/visual.less";
 
 import VisualConstructorOptions = powerbi.extensibility.visual.VisualConstructorOptions;
@@ -29,36 +27,31 @@ import DataView = powerbi.DataView;
 
 import { VisualFormattingSettingsModel } from "./settings";
 import {
-    Meeting, GanttRow, ProductRow, SiteRow, RawColumns,
-    buildMeetings, buildRows, dateExtent, formatDate, formatPercent,
+    Meeting, GanttRow, ProductRow, SiteRow, MeetingRow, RawColumns, DisplayMode,
+    buildMeetings, buildRows, allGroupKeys, dateExtent, formatDate, formatPercent,
     freeLabelInterval, truncateText, splitColor
 } from "./dataModel";
+import { TimeLevel, resolveHierarchy, milestonePath } from "./timeLevels";
+import { SettingsPanel, PanelState, PropValue, toInputColor } from "./settingsPanel";
 
 type AnySelection = Selection<any, any, any, any>;
 
-const SVG_NS = "http://www.w3.org/2000/svg";
 const MARGIN_PX = 100;          // marge gauche / droite de la timeline
-const HEADER_ROW_H = 24;        // hauteur de chaque niveau d'en-tête (Année, Mois)
+const HEADER_ROW_H = 24;        // hauteur de chaque niveau d'en-tête (haut, bas)
 const HEADER_H = HEADER_ROW_H * 2;
 const MIN_ZOOM = 0.02;
-const MAX_ZOOM = 400;
+const MAX_ZOOM = 2000;
 const DAY_MS = 24 * 3600 * 1000;
 const DIM_OPACITY = 0.3;
 const ROW_BUFFER = 10;
+const HEX_RE = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
 
-/** Locale française locale (aucun chargement externe). Semaine : lundi. */
-const frLocale = timeFormatLocale({
-    dateTime: "%A %e %B %Y à %X",
-    date: "%d/%m/%Y",
-    time: "%H:%M:%S",
-    periods: ["AM", "PM"],
-    days: ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"],
-    shortDays: ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."],
-    months: ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"],
-    shortMonths: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
-});
-const fmtShortMonth = frLocale.format("%b");
-const fmtYear = frLocale.format("%Y");
+/** Valeur choisie dans le panneau intégré, en attente de confirmation par l'hôte. */
+interface PendingOverride {
+    value: PropValue;
+    /** Valeur présente dans le rapport au moment du choix. */
+    baseline: unknown;
+}
 
 interface SiteColor {
     track: string;
@@ -85,6 +78,8 @@ export class Visual implements IVisual {
     private tlHeader: HTMLDivElement;
     private tlBody: HTMLDivElement;
     private emptyMsg: HTMLDivElement;
+    private settingsBtn: HTMLButtonElement;
+    private panel: SettingsPanel;
     private gridSvg: AnySelection;
     private gridRowsG: AnySelection;
     private headerSvg: AnySelection;
@@ -112,6 +107,12 @@ export class Visual implements IVisual {
     private measureCtx: CanvasRenderingContext2D | null = null;
     private renderScheduled = false;
     private syncingScroll = false;
+    private displayMode: DisplayMode = "rows";
+    /** Couleurs par site choisies dans le panneau intégré : site -> {track, fill}. */
+    private siteOverrides: Record<string, { track?: string; fill?: string }> = {};
+    /** Choix du panneau pas encore renvoyés par l'hôte ("objet.propriété" -> valeur). */
+    private pending = new Map<string, PendingOverride>();
+    private lastObjects: powerbi.DataViewObjects = {};
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -145,6 +146,10 @@ export class Visual implements IVisual {
         this.makeButton(toolbar, "−", "Zoom arrière", () => this.zoomBy(1 / 1.5));
         this.makeButton(toolbar, "+", "Zoom avant", () => this.zoomBy(1.5));
         this.makeButton(toolbar, "⤢", "Ajuster à la plage de dates", () => this.resetZoom());
+        this.makeButton(toolbar, "⊞", "Tout déplier", () => this.expandAll(true));
+        this.makeButton(toolbar, "⊟", "Tout replier (niveau Produit)", () => this.expandAll(false));
+        this.settingsBtn = this.makeButton(toolbar, "⚙", "Paramètres du Gantt", () => this.togglePanel());
+        this.settingsBtn.classList.add("gantt-btn-settings");
         const colTitle = this.div("gantt-col-title", this.gridHeader);
         colTitle.textContent = "Nom";
 
@@ -167,6 +172,16 @@ export class Visual implements IVisual {
 
         this.emptyMsg = this.div("gantt-empty", this.root);
         this.emptyMsg.textContent = "Aucune donnée valide : ajoutez Site, Produit, Début et Fin.";
+
+        this.panel = new SettingsPanel(this.root, {
+            onChange: (obj, prop, value) => this.setProperty(obj, prop, value),
+            onSiteColor: (site, part, hex) => this.setSiteColor(site, part, hex),
+            onResetSiteColors: () => {
+                this.siteOverrides = {};
+                this.setProperty("siteColors", "siteOverrides", "{}");
+            },
+            onClose: () => this.panel.close()
+        });
 
         // Défilement synchronisé
         this.tlBody.addEventListener("scroll", () => {
@@ -197,7 +212,7 @@ export class Visual implements IVisual {
         this.initInteractions();
     }
 
-    private makeButton(parent: HTMLElement, label: string, title: string, onClick: () => void): void {
+    private makeButton(parent: HTMLElement, label: string, title: string, onClick: () => void): HTMLButtonElement {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "gantt-btn";
@@ -209,6 +224,7 @@ export class Visual implements IVisual {
             onClick();
         });
         parent.appendChild(b);
+        return b;
     }
 
     private initSplitter(): void {
@@ -249,23 +265,14 @@ export class Visual implements IVisual {
 
     // --------------------------------------------------------------- update
 
+    private lastDataView: DataView | undefined;
+
     public update(options: VisualUpdateOptions): void {
         this.events.renderingStarted(options);
         try {
             this.viewport = options.viewport;
-            const dataView: DataView | undefined = options.dataViews && options.dataViews[0];
-            this.settings = this.formattingSettingsService.populateFormattingSettingsModel(VisualFormattingSettingsModel, dataView);
-
-            const settingsGridW = this.settings.layout.gridWidth.value;
-            if (this.lastSettingsGridWidth !== settingsGridW) {
-                this.gridWidthOverride = null;
-                this.lastSettingsGridWidth = settingsGridW;
-            }
-            this.siteColorCache.clear();
-
-            this.readData(dataView);
-            this.refreshSelectionSet();
-            this.render();
+            this.lastDataView = options.dataViews && options.dataViews[0];
+            this.process();
             this.events.renderingFinished(options);
         } catch (err) {
             // Aucune donnée n'est journalisée.
@@ -274,6 +281,175 @@ export class Visual implements IVisual {
             this.showEmpty(true);
             this.events.renderingFailed(options);
         }
+    }
+
+    /** Lit réglages + données (avec les choix en attente du panneau) puis redessine. */
+    private process(): void {
+        const dataView = this.lastDataView;
+        this.lastObjects = (dataView && dataView.metadata && dataView.metadata.objects) || {};
+        this.resolvePending();
+        const objects = this.mergedObjects();
+        const patched: DataView = {
+            ...(dataView || {}),
+            metadata: { ...((dataView && dataView.metadata) || { columns: [] }), objects }
+        } as DataView;
+        this.settings = this.formattingSettingsService.populateFormattingSettingsModel(VisualFormattingSettingsModel, patched);
+        this.displayMode = String(this.settings.layout.displayMode.value?.value) === "compact" ? "compact" : "rows";
+        this.siteOverrides = this.parseSiteOverrides(objects);
+
+        const settingsGridW = this.settings.layout.gridWidth.value;
+        if (this.lastSettingsGridWidth !== settingsGridW) {
+            this.gridWidthOverride = null;
+            this.lastSettingsGridWidth = settingsGridW;
+        }
+        this.siteColorCache.clear();
+        this.settingsBtn.style.display = this.settings.layout.showSettingsButton.value ? "" : "none";
+        if (!this.settings.layout.showSettingsButton.value) {
+            this.panel.close();
+        }
+
+        this.readData(dataView);
+        this.refreshSelectionSet();
+        this.render();
+        this.panel.refresh(this.panelState());
+    }
+
+    // ------------------------------------------------- panneau / persistance
+
+    private static same(a: unknown, b: unknown): boolean {
+        return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+    }
+
+    /** Oublie les choix confirmés par l'hôte ou modifiés ailleurs (volet Format). */
+    private resolvePending(): void {
+        this.pending.forEach((p, key) => {
+            const [obj, prop] = key.split(".");
+            const incoming = this.lastObjects[obj] ? this.lastObjects[obj][prop] : undefined;
+            if (Visual.same(incoming, p.value) || !Visual.same(incoming, p.baseline)) {
+                this.pending.delete(key);
+            }
+        });
+    }
+
+    private mergedObjects(): powerbi.DataViewObjects {
+        const merged: powerbi.DataViewObjects = {};
+        Object.keys(this.lastObjects).forEach(k => { merged[k] = { ...this.lastObjects[k] }; });
+        this.pending.forEach((p, key) => {
+            const [obj, prop] = key.split(".");
+            merged[obj] = { ...(merged[obj] || {}), [prop]: p.value as powerbi.DataViewPropertyValue };
+        });
+        return merged;
+    }
+
+    private setProperty(objectName: string, propertyName: string, value: PropValue): void {
+        const key = objectName + "." + propertyName;
+        const baseline = this.lastObjects[objectName] ? this.lastObjects[objectName][propertyName] : undefined;
+        this.pending.set(key, { value, baseline });
+        try {
+            this.host.persistProperties({
+                merge: [{ objectName, selector: null, properties: { [propertyName]: value as powerbi.DataViewPropertyValue } }]
+            });
+        } catch {
+            // Mode lecture : le choix reste appliqué pour la session en cours.
+        }
+        this.process();
+    }
+
+    /** Lit le JSON des couleurs par site (validé : uniquement des couleurs hexadécimales). */
+    private parseSiteOverrides(objects: powerbi.DataViewObjects): Record<string, { track?: string; fill?: string }> {
+        const raw = objects.siteColors ? objects.siteColors.siteOverrides : undefined;
+        const out: Record<string, { track?: string; fill?: string }> = {};
+        if (typeof raw !== "string" || !raw) {
+            return out;
+        }
+        try {
+            const parsed: unknown = JSON.parse(raw);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                Object.keys(parsed).forEach(site => {
+                    const v = (parsed as Record<string, unknown>)[site];
+                    if (!v || typeof v !== "object") {
+                        return;
+                    }
+                    const t = (v as Record<string, unknown>).track;
+                    const f = (v as Record<string, unknown>).fill;
+                    const entry: { track?: string; fill?: string } = {};
+                    if (typeof t === "string" && HEX_RE.test(t)) {
+                        entry.track = t;
+                    }
+                    if (typeof f === "string" && HEX_RE.test(f)) {
+                        entry.fill = f;
+                    }
+                    if (entry.track || entry.fill) {
+                        out[site] = entry;
+                    }
+                });
+            }
+        } catch {
+            // JSON invalide : ignoré
+        }
+        return out;
+    }
+
+    private setSiteColor(site: string, part: "track" | "fill", hex: string): void {
+        if (!HEX_RE.test(hex)) {
+            return;
+        }
+        const next = { ...this.siteOverrides };
+        next[site] = { ...(next[site] || {}), [part]: hex };
+        this.setProperty("siteColors", "siteOverrides", JSON.stringify(next));
+    }
+
+    private togglePanel(): void {
+        if (this.panel.isOpen()) {
+            this.panel.close();
+        } else {
+            this.panel.open(this.panelState());
+        }
+    }
+
+    private panelState(): PanelState {
+        const st = this.settings;
+        const sites = this.rows.filter(r => r.kind === "site").map(r => {
+            const c = this.colorOf(r.site);
+            return { site: r.site, track: c.track, fill: c.fill, custom: !!this.siteOverrides[r.site] };
+        });
+        return {
+            displayMode: this.displayMode,
+            hierarchy: String(st.timeline.hierarchy.value?.value ?? "year-month"),
+            rowHeight: this.rowHeight(),
+            barHeightPercent: st.layout.barHeightPercent.value,
+            milestoneShape: String(st.milestones.shape.value?.value ?? "diamond"),
+            milestoneSize: this.milestoneSize(),
+            milestoneFill: toInputColor(st.milestones.fill.value.value),
+            labelsShow: st.labels.show.value,
+            labelsPosition: String(st.labels.position.value?.value ?? "above"),
+            showProgressLabel: st.progress.showLabel.value,
+            progressScale: String(st.progress.scale.value?.value ?? "0-1"),
+            trackOpacity: st.siteColors.trackOpacity.value,
+            sites
+        };
+    }
+
+    private expandAll(expand: boolean): void {
+        this.collapsed.clear();
+        if (!expand) {
+            // Mode "rows" : replie au niveau Produit (sites visibles) ; mode compact : replie les sites.
+            const keys = allGroupKeys(this.meetings, this.displayMode);
+            const productLevel = this.displayMode === "rows";
+            keys.filter(k => productLevel ? k.startsWith("P|") : k.startsWith("S|")).forEach(k => this.collapsed.add(k));
+        }
+        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode);
+        this.render();
+    }
+
+    private toggleGroup(key: string): void {
+        if (this.collapsed.has(key)) {
+            this.collapsed.delete(key);
+        } else {
+            this.collapsed.add(key);
+        }
+        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode);
+        this.render();
     }
 
     private readData(dataView: DataView | undefined): void {
@@ -301,7 +477,7 @@ export class Visual implements IVisual {
         this.meetings = res.meetings;
         this.siteOrder = res.siteOrder;
         this.siteFirstSeen = res.siteFirstSeen;
-        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed);
+        this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed, this.displayMode);
 
         const ext = dateExtent(this.meetings);
         const key = ext ? ext[0].getTime() + "|" + ext[1].getTime() : "";
@@ -374,6 +550,13 @@ export class Visual implements IVisual {
             const idx = Math.max(0, others.indexOf(site)) % sc.palette.length;
             trackHex = sc.palette[idx][0].value.value;
             fillHex = sc.palette[idx][1].value.value;
+        }
+        const ov = this.siteOverrides[site];
+        if (ov && ov.track) {
+            trackHex = ov.track;
+        }
+        if (ov && ov.fill) {
+            fillHex = ov.fill;
         }
         const t = splitColor(trackHex, trackFallback);
         const f = splitColor(fillHex, 1);
@@ -540,6 +723,13 @@ export class Visual implements IVisual {
 
     // ------------------------------------------------------- en-tête dates
 
+    /** Niveaux (haut, bas) de la timeline selon la hiérarchie choisie et le zoom. */
+    private levels(): [TimeLevel, TimeLevel] {
+        const d0 = this.x.invert(0);
+        const pxPerDay = this.x(new Date(d0.getTime() + DAY_MS)) - this.x(d0);
+        return resolveHierarchy(String(this.settings.timeline.hierarchy.value?.value ?? "year-month"), pxPerDay);
+    }
+
     private renderHeader(): void {
         const tl = this.settings.timeline;
         const w = this.contentWidth;
@@ -549,45 +739,49 @@ export class Visual implements IVisual {
         const d0 = this.x.invert(0);
         const d1 = this.x.invert(w);
         const fontFamily = this.gridFontFamily();
+        const [top, bottom] = this.levels();
+        const lineColor = tl.gridLineColor.value.value;
 
         svg.append("rect").attr("x", 0).attr("y", 0).attr("width", w).attr("height", HEADER_ROW_H).attr("fill", tl.yearBackground.value.value);
         svg.append("rect").attr("x", 0).attr("y", HEADER_ROW_H).attr("width", w).attr("height", HEADER_ROW_H).attr("fill", tl.monthBackground.value.value);
 
-        // Années
-        const years = timeYear.range(timeYear.floor(d0), timeYear.offset(timeYear.floor(d1), 1));
-        const yg = svg.append("g").attr("class", "years");
-        years.forEach(y => {
-            const xs = Math.max(0, this.x(y));
-            const xe = Math.min(w, this.x(timeYear.offset(y, 1)));
-            if (xe <= xs) {
-                return;
-            }
-            yg.append("line").attr("x1", this.x(y)).attr("x2", this.x(y)).attr("y1", 0).attr("y2", HEADER_ROW_H).attr("stroke", tl.gridLineColor.value.value);
-            const label = fmtYear(y);
-            const avail = xe - xs - 8;
-            const txt = truncateText(label, avail, s => this.measure(s, 11, fontFamily));
-            if (txt) {
-                yg.append("text").attr("x", xs + 4).attr("y", HEADER_ROW_H / 2).attr("dy", "0.35em")
-                    .attr("fill", tl.yearTextColor.value.value).style("font-size", "11px").style("font-weight", "600").text(txt);
-            }
-        });
+        const drawLevel = (level: TimeLevel, y: number, cls: string, color: string, fontSize: number, weight: string) => {
+            const g = svg.append("g").attr("class", cls);
+            const ticks = level.interval.range(level.interval.floor(d0), level.interval.offset(level.interval.floor(d1), 1));
+            ticks.forEach(t => {
+                const xs = this.x(t);
+                const xe = this.x(level.interval.offset(t, 1));
+                if (xe < 0 || xs > w) {
+                    return;
+                }
+                g.append("line").attr("x1", xs).attr("x2", xs).attr("y1", y).attr("y2", y + HEADER_ROW_H).attr("stroke", lineColor);
+                // Libellé dans la partie visible du segment
+                const vs = Math.max(0, xs);
+                const avail = Math.min(w, xe) - vs - 6;
+                const measure = (str: string) => this.measure(str, fontSize, fontFamily);
+                let txt = "";
+                for (const fmt of level.labels) {
+                    const candidate = fmt(t);
+                    if (measure(candidate) <= avail) {
+                        txt = candidate;
+                        break;
+                    }
+                }
+                if (!txt) {
+                    txt = truncateText(level.labels[level.labels.length - 1](t), avail, measure);
+                    if (txt === "…") {
+                        txt = "";
+                    }
+                }
+                if (txt) {
+                    g.append("text").attr("x", vs + 3).attr("y", y + HEADER_ROW_H / 2).attr("dy", "0.35em")
+                        .attr("fill", color).style("font-size", fontSize + "px").style("font-weight", weight).text(txt);
+                }
+            });
+        };
+        drawLevel(top, 0, "level-top", tl.yearTextColor.value.value, 11, "600");
+        drawLevel(bottom, HEADER_ROW_H, "level-bottom", tl.monthTextColor.value.value, 10, "400");
 
-        // Mois (libellés courts français)
-        const months = timeMonth.range(timeMonth.floor(d0), timeMonth.offset(timeMonth.floor(d1), 1));
-        const mg = svg.append("g").attr("class", "months");
-        months.forEach(m => {
-            const xs = this.x(m);
-            const xe = this.x(timeMonth.offset(m, 1));
-            if (xe < 0 || xs > w) {
-                return;
-            }
-            mg.append("line").attr("x1", xs).attr("x2", xs).attr("y1", HEADER_ROW_H).attr("y2", HEADER_H).attr("stroke", tl.gridLineColor.value.value);
-            const txt = truncateText(fmtShortMonth(m), xe - xs - 6, s => this.measure(s, 10, fontFamily));
-            if (txt) {
-                mg.append("text").attr("x", xs + 3).attr("y", HEADER_ROW_H * 1.5).attr("dy", "0.35em")
-                    .attr("fill", tl.monthTextColor.value.value).style("font-size", "10px").text(txt);
-            }
-        });
         svg.append("line").attr("x1", 0).attr("x2", w).attr("y1", HEADER_H - 0.5).attr("y2", HEADER_H - 0.5).attr("stroke", "#d0d0d0");
         svg.append("line").attr("x1", 0).attr("x2", w).attr("y1", HEADER_ROW_H - 0.5).attr("y2", HEADER_ROW_H - 0.5).attr("stroke", "#e0e0e0");
     }
@@ -596,9 +790,9 @@ export class Visual implements IVisual {
         const color = this.settings.timeline.gridLineColor.value.value;
         const d0 = this.x.invert(0);
         const d1 = this.x.invert(this.contentWidth);
-        const weekPx = this.x(new Date(d0.getTime() + 7 * DAY_MS)) - this.x(d0);
-        // Semaines (début lundi) si assez de place, sinon mois.
-        const ticks = weekPx >= 25 ? timeMonday.range(timeMonday.floor(d0), d1) : timeMonth.range(timeMonth.floor(d0), d1);
+        // Lignes verticales au niveau bas de la hiérarchie (semaines : début lundi).
+        const bottom = this.levels()[1];
+        const ticks = bottom.interval.range(bottom.interval.floor(d0), d1);
         const sel = this.gridLinesG.selectAll<SVGLineElement, Date>("line").data(ticks, (d: Date) => String(d.getTime()));
         sel.exit().remove();
         sel.enter().append("line")
@@ -638,6 +832,7 @@ export class Visual implements IVisual {
         all.attr("transform", d => `translate(0,${d.index * rh})`)
             .classed("site", d => d.row.kind === "site")
             .classed("product", d => d.row.kind === "product")
+            .classed("meeting-row", d => d.row.kind === "meeting")
             .style("cursor", "pointer")
             .style("opacity", d => this.rowOpacity(d.row));
         all.select("rect.grow-bg")
@@ -646,20 +841,34 @@ export class Visual implements IVisual {
         all.select("line.grow-sep")
             .attr("x1", 0).attr("x2", gw).attr("y1", rh - 0.5).attr("y2", rh - 0.5).attr("stroke", "#ececec");
         all.select("text.grow-text")
-            .attr("x", d => d.row.kind === "site" ? 6 : 22)
+            .attr("x", d => this.gridIndent(d.row))
             .attr("y", rh / 2).attr("dy", "0.35em")
             .attr("fill", textColor)
             .style("font-size", fontSize + "px")
             .style("font-family", fontFamily)
-            .style("font-weight", d => d.row.kind === "site" ? "600" : "400")
+            .style("font-weight", d => d.row.kind === "site" ? "600" : d.row.kind === "product" && this.displayMode === "rows" ? "500" : "400")
+            .style("fill-opacity", d => d.row.kind === "meeting" ? 0.85 : 1)
             .text(d => {
-                const label = d.row.kind === "site"
-                    ? ((d.row as SiteRow).collapsed ? "▸ " : "▾ ") + d.row.site
-                    : (d.row as ProductRow).product;
-                const avail = gw - (d.row.kind === "site" ? 6 : 22) - 6;
-                return truncateText(label, avail, s => this.measure(s, fontSize, fontFamily));
+                const avail = gw - this.gridIndent(d.row) - 6;
+                return truncateText(this.gridLabel(d.row), avail, str => this.measure(str, fontSize, fontFamily));
             });
-        all.select("title").text(d => d.row.kind === "site" ? d.row.site : (d.row as ProductRow).product);
+        all.select("title").text(d => this.gridLabel(d.row, false));
+    }
+
+    /** Retrait horizontal du libellé selon le niveau (Site > Produit > Réunion). */
+    private gridIndent(row: GanttRow): number {
+        return row.kind === "site" ? 6 : row.kind === "product" ? 20 : 40;
+    }
+
+    private gridLabel(row: GanttRow, withChevron = true): string {
+        if (row.kind === "site") {
+            return (withChevron ? (row.collapsed ? "▸ " : "▾ ") : "") + row.site;
+        }
+        if (row.kind === "product") {
+            const chevron = withChevron && row.collapsible ? (row.collapsed ? "▸ " : "▾ ") : "";
+            return chevron + row.product;
+        }
+        return row.meeting.deliverable || "(Sans nom)";
     }
 
     // -------------------------------------------------------------- timeline
@@ -714,27 +923,33 @@ export class Visual implements IVisual {
         const labels = g.select("g.layer-labels");
         const milestones = g.select("g.layer-milestones");
 
-        if (row.kind === "site") {
-            // Barre de synthèse fine (étendue du site)
-            const data = row.start && row.end ? [row] : [];
+        const summaryOnly = row.kind === "site" || (row.kind === "product" && row.collapsible && !row.collapsed);
+        if (summaryOnly) {
+            // Barre de synthèse fine (étendue du site ou du produit)
+            const span = row as SiteRow | ProductRow;
+            const data = span.start && span.end ? [span] : [];
             const c = this.colorOf(row.site);
-            const s = tracks.selectAll<SVGRectElement, SiteRow>("rect.summary").data(data);
+            const thick = row.kind === "site" ? 4 : 6;
+            tracks.selectAll("g.meeting").remove();
+            const s = tracks.selectAll<SVGRectElement, SiteRow | ProductRow>("rect.summary").data(data);
             s.exit().remove();
             s.enter().append("rect").attr("class", "summary").merge(s)
                 .attr("x", d => this.x(d.start))
                 .attr("width", d => Math.max(2, this.x(d.end) - this.x(d.start)))
-                .attr("y", rh / 2 - 2).attr("height", 4).attr("rx", 2)
-                .attr("fill", c.fill).attr("fill-opacity", 0.45);
+                .attr("y", rh / 2 - thick / 2).attr("height", thick).attr("rx", thick / 2)
+                .attr("fill", c.fill).attr("fill-opacity", row.kind === "site" ? 0.45 : 0.3)
+                .style("opacity", row.kind === "product" ? this.rowOpacity(row) : 1);
             lines.selectAll("*").remove();
             labels.selectAll("*").remove();
             milestones.selectAll("*").remove();
             return;
         }
+        tracks.selectAll("rect.summary").remove();
 
         // Position verticale de la barre
         const barTop = above ? Math.max(0, rh - bh - 2) : Math.round((rh - bh) / 2);
         const cy = barTop + bh / 2;
-        const meetings = row.meetings;
+        const meetings = row.kind === "meeting" ? [(row as MeetingRow).meeting] : (row as ProductRow).meetings;
         const geo = meetings.map(m => {
             const x0 = this.x(m.start);
             const x1 = Math.max(x0 + 2, this.x(m.end));
@@ -858,11 +1073,11 @@ export class Visual implements IVisual {
 
         // Jalons (dessinés en dernier : au-dessus des labels)
         const msData = geo.filter(d => d.xm !== null);
-        const h = ms / 2;
+        const shapePath = milestonePath(String(this.settings.milestones.shape.value?.value ?? "diamond"), ms);
         const mss = milestones.selectAll<SVGPathElement, typeof geo[0]>("path.milestone").data(msData, d => String(d.m.rowIndex));
         mss.exit().remove();
         mss.enter().append("path").attr("class", "milestone").merge(mss)
-            .attr("d", `M0,${-h}L${h},0L0,${h}L${-h},0Z`)
+            .attr("d", shapePath)
             .attr("transform", d => `translate(${d.xm},${cy})`)
             .attr("fill", msFill).attr("stroke", msStroke).attr("stroke-width", 1)
             .style("opacity", d => this.meetingOpacity(d.m));
@@ -901,6 +1116,9 @@ export class Visual implements IVisual {
         }
         if (row.kind === "site") {
             return 1;
+        }
+        if (row.kind === "meeting") {
+            return this.selectedRows.has(row.meeting.rowIndex) ? 1 : DIM_OPACITY;
         }
         return row.meetings.some(m => this.selectedRows.has(m.rowIndex)) ? 1 : DIM_OPACITY;
     }
@@ -973,28 +1191,38 @@ export class Visual implements IVisual {
             }
         });
 
-        // Grille : repli / dépli des sites, sélection des produits
+        // Grille : repli / dépli des sites et produits, sélection des réunions
         this.gridBody.addEventListener("click", (e: MouseEvent) => {
             const row = this.rowFromGridEvent(e);
             if (!row) {
                 this.selectionManager.clear().then(() => this.refreshSelection());
                 return;
             }
+            const multi = e.ctrlKey || e.metaKey;
             if (row.kind === "site") {
-                if (this.collapsed.has(row.site)) {
-                    this.collapsed.delete(row.site);
+                this.toggleGroup(row.key);
+            } else if (row.kind === "product") {
+                // Clic sur le chevron : replier / déplier ; clic sur le nom : sélectionner ses réunions.
+                const xIn = e.clientX - this.gridBody.getBoundingClientRect().left;
+                if (row.collapsible && xIn < this.gridIndent(row) + 14) {
+                    this.toggleGroup(row.key);
                 } else {
-                    this.collapsed.add(row.site);
+                    this.applySelection(row.meetings.map(m => m.selectionId), multi);
                 }
-                this.rows = buildRows(this.meetings, this.siteOrder, this.siteFirstSeen, this.collapsed);
-                this.render();
             } else {
-                this.applySelection(row.meetings.map(m => m.selectionId), e.ctrlKey || e.metaKey);
+                this.applySelection([row.meeting.selectionId], multi);
+            }
+        });
+        this.gridBody.addEventListener("dblclick", (e: MouseEvent) => {
+            const row = this.rowFromGridEvent(e);
+            if (row && row.kind === "product" && row.collapsible) {
+                this.toggleGroup(row.key);
             }
         });
         this.gridBody.addEventListener("contextmenu", (e: MouseEvent) => {
             const row = this.rowFromGridEvent(e);
-            const id = row && row.kind === "product" && row.meetings.length ? row.meetings[0].selectionId : ({} as ISelectionId);
+            const id = row && row.kind === "meeting" ? row.meeting.selectionId
+                : row && row.kind === "product" && row.meetings.length ? row.meetings[0].selectionId : ({} as ISelectionId);
             this.selectionManager.showContextMenu(id, { x: e.clientX, y: e.clientY });
             e.preventDefault();
         });

@@ -6,6 +6,7 @@
 
 import powerbi from "powerbi-visuals-api";
 import { formattingSettings } from "powerbi-visuals-utils-formattingmodel";
+import { HIERARCHIES, MILESTONE_SHAPES } from "./timeLevels";
 
 import FormattingSettingsCard = formattingSettings.SimpleCard;
 import FormattingSettingsSlice = formattingSettings.Slice;
@@ -27,19 +28,29 @@ function num(name: string, displayName: string, value: number, min: number, max:
     });
 }
 
-/** Disposition : hauteur de ligne, hauteur de barre, largeur de la grille. */
+export const DISPLAY_MODES: powerbi.IEnumMember[] = [
+    { value: "rows", displayName: "Une ligne par réunion (Site > Produit > Réunion)" },
+    { value: "compact", displayName: "Compact (réunions sur la ligne Produit)" }
+];
+
+/** Disposition : mode d'affichage, hauteur de ligne, hauteur de barre, largeur de la grille. */
 export class LayoutCard extends FormattingSettingsCard {
+    displayMode = new formattingSettings.ItemDropdown({ name: "displayMode", displayName: "Mode d'affichage", items: DISPLAY_MODES, value: DISPLAY_MODES[0] });
     rowHeight = num("rowHeight", "Hauteur de ligne (px)", 30, 16, 80);
     barHeightPercent = num("barHeightPercent", "Hauteur de barre (% de la ligne)", 60, 10, 100);
     gridWidth = num("gridWidth", "Largeur de la grille (px)", 200, 60, 800);
+    showSettingsButton = new formattingSettings.ToggleSwitch({ name: "showSettingsButton", displayName: "Bouton de paramétrage (⚙) dans le visuel", value: true });
 
     name = "layout";
     displayName = "Disposition";
-    slices: FormattingSettingsSlice[] = [this.rowHeight, this.barHeightPercent, this.gridWidth];
+    slices: FormattingSettingsSlice[] = [this.displayMode, this.rowHeight, this.barHeightPercent, this.gridWidth, this.showSettingsButton];
 }
 
-/** Jalons : losange. */
+export const SHAPE_ITEMS: powerbi.IEnumMember[] = MILESTONE_SHAPES.map(s => ({ value: s.value, displayName: s.displayName }));
+
+/** Jalons : symbole, taille, couleurs. */
 export class MilestoneCard extends FormattingSettingsCard {
+    shape = new formattingSettings.ItemDropdown({ name: "shape", displayName: "Symbole du jalon", items: SHAPE_ITEMS, value: SHAPE_ITEMS[0] });
     size = num("size", "Taille du jalon (px)", 10, 4, 40);
     fill = color("fill", "Couleur du jalon", "#f44a53");
     stroke = color("stroke", "Bordure du jalon", "#000000");
@@ -47,7 +58,7 @@ export class MilestoneCard extends FormattingSettingsCard {
 
     name = "milestones";
     displayName = "Jalons";
-    slices: FormattingSettingsSlice[] = [this.size, this.fill, this.stroke, this.lineColor];
+    slices: FormattingSettingsSlice[] = [this.shape, this.size, this.fill, this.stroke, this.lineColor];
 }
 
 /** Palette par défaut pour les sites autres que Lille / Ulis (piste, remplissage). */
@@ -141,18 +152,21 @@ const dateFormatItems: powerbi.IEnumMember[] = [
     { value: "YYYY-MM-DD", displayName: "AAAA-MM-JJ" }
 ];
 
-/** En-têtes de la timeline et format de date. */
+export const HIERARCHY_ITEMS: powerbi.IEnumMember[] = HIERARCHIES.map(h => ({ value: h.value, displayName: h.displayName }));
+
+/** En-têtes de la timeline, hiérarchie de dates et format de date. */
 export class TimelineCard extends FormattingSettingsCard {
-    yearBackground = color("yearBackground", "Fond - Année", "#e9eef3");
-    yearTextColor = color("yearTextColor", "Texte - Année", "#333333");
-    monthBackground = color("monthBackground", "Fond - Mois", "#f7f9fb");
-    monthTextColor = color("monthTextColor", "Texte - Mois", "#555555");
+    hierarchy = new formattingSettings.ItemDropdown({ name: "hierarchy", displayName: "Hiérarchie de dates", items: HIERARCHY_ITEMS, value: HIERARCHY_ITEMS[2] });
+    yearBackground = color("yearBackground", "Fond - niveau haut", "#e9eef3");
+    yearTextColor = color("yearTextColor", "Texte - niveau haut", "#333333");
+    monthBackground = color("monthBackground", "Fond - niveau bas", "#f7f9fb");
+    monthTextColor = color("monthTextColor", "Texte - niveau bas", "#555555");
     gridLineColor = color("gridLineColor", "Lignes de grille", "#e6e6e6");
     dateFormat = new formattingSettings.ItemDropdown({ name: "dateFormat", displayName: "Format de date (infobulles)", items: dateFormatItems, value: dateFormatItems[0] });
 
     name = "timeline";
     displayName = "Timeline";
-    slices: FormattingSettingsSlice[] = [this.yearBackground, this.yearTextColor, this.monthBackground, this.monthTextColor, this.gridLineColor, this.dateFormat];
+    slices: FormattingSettingsSlice[] = [this.hierarchy, this.yearBackground, this.yearTextColor, this.monthBackground, this.monthTextColor, this.gridLineColor, this.dateFormat];
 }
 
 export class VisualFormattingSettingsModel extends FormattingSettingsModel {

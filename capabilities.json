@@ -174,6 +174,25 @@
           "type": {
             "numeric": true
           }
+        },
+        "displayMode": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "rows",
+                "displayName": "Une ligne par réunion"
+              },
+              {
+                "value": "compact",
+                "displayName": "Compact"
+              }
+            ]
+          }
+        },
+        "showSettingsButton": {
+          "type": {
+            "bool": true
+          }
         }
       }
     },
@@ -209,6 +228,36 @@
                 "color": true
               }
             }
+          }
+        },
+        "shape": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "diamond",
+                "displayName": "Losange"
+              },
+              {
+                "value": "circle",
+                "displayName": "Cercle"
+              },
+              {
+                "value": "square",
+                "displayName": "Carré"
+              },
+              {
+                "value": "triangle",
+                "displayName": "Triangle"
+              },
+              {
+                "value": "star",
+                "displayName": "Étoile"
+              },
+              {
+                "value": "flag",
+                "displayName": "Drapeau"
+              }
+            ]
           }
         }
       }
@@ -362,6 +411,11 @@
         "trackOpacity": {
           "type": {
             "numeric": true
+          }
+        },
+        "siteOverrides": {
+          "type": {
+            "text": true
           }
         }
       }
@@ -532,6 +586,40 @@
               {
                 "value": "YYYY-MM-DD",
                 "displayName": "AAAA-MM-JJ"
+              }
+            ]
+          }
+        },
+        "hierarchy": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "auto",
+                "displayName": "Automatique"
+              },
+              {
+                "value": "year-quarter",
+                "displayName": "Année > Trimestre"
+              },
+              {
+                "value": "year-month",
+                "displayName": "Année > Mois"
+              },
+              {
+                "value": "quarter-month",
+                "displayName": "Trimestre > Mois"
+              },
+              {
+                "value": "month-week",
+                "displayName": "Mois > Semaine"
+              },
+              {
+                "value": "month-day",
+                "displayName": "Mois > Jour"
+              },
+              {
+                "value": "week-day",
+                "displayName": "Semaine > Jour"
               }
             ]
           }
