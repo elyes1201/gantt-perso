@@ -35,6 +35,16 @@ export interface PanelState {
     barHeightPercent: number;
     milestoneShape: string;
     milestoneSize: number;
+    milestonePosition: string;
+    /** Colonnes Relecture / Approbation présentes dans le visuel. */
+    hasSubData: boolean;
+    subShow: boolean;
+    subStart: string;
+    subHeight: number;
+    subBarPercent: number;
+    reviewColor: string;
+    approvalColor: string;
+    subLegend: boolean;
     milestoneFill: string;
     labelsShow: boolean;
     labelsPosition: string;
@@ -66,6 +76,16 @@ const LABEL_POSITIONS: Option[] = [
     { value: "above", displayName: "Au-dessus" },
     { value: "insideLeft", displayName: "Intérieur gauche" }
 ];
+const MS_POSITIONS: Option[] = [
+    { value: "straddle", displayName: "Ligne + sous-ligne" },
+    { value: "main", displayName: "Ligne principale" }
+];
+const SUB_STARTS: Option[] = [
+    { value: "end", displayName: "Après la fin" },
+    { value: "start", displayName: "Depuis le début" }
+];
+/** Taille maximale du jalon (px). */
+export const MILESTONE_MAX = 60;
 const SCALES: Option[] = [
     { value: "0-1", displayName: "0 - 1" },
     { value: "0-100", displayName: "0 - 100" }
@@ -176,8 +196,24 @@ export class SettingsPanel {
 
         this.section("Jalons");
         this.shapePicker(s.milestoneShape, s.milestoneFill, v => cb.onChange("milestones", "shape", v));
-        this.number("Taille (px)", s.milestoneSize, 4, 40, 1, v => cb.onChange("milestones", "size", v));
+        this.stepper("Taille (px)", s.milestoneSize, 4, MILESTONE_MAX, 2, v => cb.onChange("milestones", "size", v));
+        this.select("Position", MS_POSITIONS, s.milestonePosition, v => cb.onChange("milestones", "position", v));
         this.color("Couleur", s.milestoneFill, v => cb.onChange("milestones", "fill", { solid: { color: v } }));
+
+        this.section("Relecture / Approbation");
+        if (!s.hasSubData) {
+            const info = document.createElement("div");
+            info.className = "gantt-panel-hint";
+            info.textContent = "Ajoutez les colonnes Relecture et/ou Approbation dans les champs du visuel pour afficher la sous-ligne.";
+            this.body.appendChild(info);
+        }
+        this.checkbox("Afficher la sous-ligne", s.subShow, v => cb.onChange("subLine", "show", v));
+        this.select("Départ de la relecture", SUB_STARTS, s.subStart, v => cb.onChange("subLine", "start", v));
+        this.stepper("Hauteur sous-ligne (px)", s.subHeight, 6, 60, 2, v => cb.onChange("subLine", "height", v));
+        this.range("Épaisseur de la barre (%)", s.subBarPercent, 10, 100, 5, v => cb.onChange("subLine", "barPercent", v));
+        this.color("Couleur Relecture", s.reviewColor, v => cb.onChange("subLine", "reviewColor", { solid: { color: v } }));
+        this.color("Couleur Approbation", s.approvalColor, v => cb.onChange("subLine", "approvalColor", { solid: { color: v } }));
+        this.checkbox("Légende dans la grille", s.subLegend, v => cb.onChange("subLine", "showGridLegend", v));
 
         this.section("Labels et progression");
         this.checkbox("Afficher le nom de la réunion", s.labelsShow, v => cb.onChange("labels", "show", v));
@@ -258,6 +294,44 @@ export class SettingsPanel {
             }
         });
         row.appendChild(input);
+    }
+
+    /** Champ numérique avec boutons − / + (pas = step). */
+    private stepper(label: string, value: number, min: number, max: number, step: number, onChange: (v: number) => void): void {
+        const row = this.field(label);
+        const wrap = document.createElement("span");
+        wrap.className = "gantt-panel-stepper";
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = String(min);
+        input.max = String(max);
+        input.step = "1";
+        input.value = String(value);
+        const clamp = (v: number) => Math.max(min, Math.min(max, v));
+        const mk = (text: string, title: string, delta: number) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "gantt-btn";
+            b.textContent = text;
+            b.title = title;
+            b.setAttribute("aria-label", `${label} : ${title}`);
+            b.disabled = delta < 0 ? value <= min : value >= max;
+            b.addEventListener("click", (e) => {
+                e.preventDefault();
+                onChange(clamp((Number(input.value) || value) + delta));
+            });
+            return b;
+        };
+        input.addEventListener("change", () => {
+            const v = Number(input.value);
+            if (isFinite(v)) {
+                onChange(clamp(v));
+            }
+        });
+        wrap.appendChild(mk("−", "Diminuer", -step));
+        wrap.appendChild(input);
+        wrap.appendChild(mk("+", "Augmenter", step));
+        row.appendChild(wrap);
     }
 
     private range(label: string, value: number, min: number, max: number, step: number, onChange: (v: number) => void): void {

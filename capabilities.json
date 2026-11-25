@@ -72,6 +72,18 @@
           "numeric": true
         }
       ]
+    },
+    {
+      "name": "review",
+      "displayName": "Relecture",
+      "description": "Date de fin de la relecture (sous-ligne)",
+      "kind": "Grouping"
+    },
+    {
+      "name": "approval",
+      "displayName": "Approbation",
+      "description": "Date de fin de l'approbation (sous-ligne)",
+      "kind": "Grouping"
     }
   ],
   "dataViewMappings": [
@@ -100,6 +112,12 @@
             "max": 1
           },
           "siteOrder": {
+            "max": 1
+          },
+          "review": {
+            "max": 1
+          },
+          "approval": {
             "max": 1
           }
         }
@@ -145,6 +163,16 @@
             {
               "for": {
                 "in": "siteOrder"
+              }
+            },
+            {
+              "for": {
+                "in": "review"
+              }
+            },
+            {
+              "for": {
+                "in": "approval"
               }
             }
           ],
@@ -288,6 +316,20 @@
               {
                 "value": "flag",
                 "displayName": "Drapeau"
+              }
+            ]
+          }
+        },
+        "position": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "straddle",
+                "displayName": "À cheval sur la ligne et la sous-ligne"
+              },
+              {
+                "value": "main",
+                "displayName": "Sur la ligne principale"
               }
             ]
           }
@@ -673,6 +715,62 @@
         "todayWidth": {
           "type": {
             "numeric": true
+          }
+        }
+      }
+    },
+    "subLine": {
+      "properties": {
+        "show": {
+          "type": {
+            "bool": true
+          }
+        },
+        "start": {
+          "type": {
+            "enumeration": [
+              {
+                "value": "end",
+                "displayName": "Après la fin de la réunion"
+              },
+              {
+                "value": "start",
+                "displayName": "Depuis le début de la réunion"
+              }
+            ]
+          }
+        },
+        "height": {
+          "type": {
+            "numeric": true
+          }
+        },
+        "barPercent": {
+          "type": {
+            "numeric": true
+          }
+        },
+        "reviewColor": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "approvalColor": {
+          "type": {
+            "fill": {
+              "solid": {
+                "color": true
+              }
+            }
+          }
+        },
+        "showGridLegend": {
+          "type": {
+            "bool": true
           }
         }
       }

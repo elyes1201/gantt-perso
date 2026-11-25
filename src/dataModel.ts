@@ -13,6 +13,10 @@ export interface Meeting {
     start: Date;
     end: Date;
     milestone: Date | null;
+    /** Date de fin de la relecture (sous-ligne), ou null. */
+    review: Date | null;
+    /** Date de fin de l'approbation (sous-ligne), ou null. */
+    approval: Date | null;
     /** Progression normalisée dans [0, 1] ; null si absente. */
     progress: number | null;
     /** Valeur brute de progression (pour l'infobulle). */
@@ -82,6 +86,8 @@ export interface RawColumns {
     milestone: number;
     progress: number;
     siteOrder: number;
+    review: number;
+    approval: number;
 }
 
 export const EMPTY_LABEL = "(Vide)";
@@ -224,6 +230,8 @@ export function buildMeetings(rows: unknown[][], cols: RawColumns, progressScale
             start,
             end,
             milestone: parseDate(get(row, cols.milestone)),
+            review: parseDate(get(row, cols.review)),
+            approval: parseDate(get(row, cols.approval)),
             progress: normalizeProgress(rawProgress, progressScale),
             rawProgress
         });
@@ -328,9 +336,11 @@ export function dateExtent(meetings: Meeting[]): [Date, Date] | null {
     for (const m of meetings) {
         min = Math.min(min, m.start.getTime());
         max = Math.max(max, m.end.getTime());
-        if (m.milestone) {
-            min = Math.min(min, m.milestone.getTime());
-            max = Math.max(max, m.milestone.getTime());
+        for (const d of [m.milestone, m.review, m.approval]) {
+            if (d) {
+                min = Math.min(min, d.getTime());
+                max = Math.max(max, d.getTime());
+            }
         }
     }
     if (!isFinite(min) || !isFinite(max)) {
@@ -424,4 +434,34 @@ export function splitColor(hex: string, fallbackOpacity: number): { color: strin
         return { color: s, opacity: fallbackOpacity };
     }
     return { color: s || "#999999", opacity: fallbackOpacity };
+}
+
+/** Point de départ de la sous-ligne : fin de la réunion (défaut) ou début de la réunion. */
+export type SubLineStart = "end" | "start";
+
+export interface SubSegments {
+    /** [début, fin] de la phase de relecture, ou null. */
+    review: [Date, Date] | null;
+    /** [début, fin] de la phase d'approbation, ou null. */
+    approval: [Date, Date] | null;
+}
+
+/**
+ * Découpe la sous-ligne d'une réunion en deux phases pleines :
+ *  - Relecture : du point de départ (Fin ou Début de la réunion) à la date Relecture ;
+ *  - Approbation : de la date Relecture (ou du point de départ si elle est vide) à la date Approbation.
+ * Une phase dont la date de fin n'est pas après son début n'est pas dessinée.
+ */
+export function subSegments(m: Meeting, start: SubLineStart): SubSegments {
+    const origin = start === "start" ? m.start : m.end;
+    let review: [Date, Date] | null = null;
+    let approval: [Date, Date] | null = null;
+    if (m.review && m.review.getTime() > origin.getTime()) {
+        review = [origin, m.review];
+    }
+    const apprStart = review ? review[1] : origin;
+    if (m.approval && m.approval.getTime() > apprStart.getTime()) {
+        approval = [apprStart, m.approval];
+    }
+    return { review, approval };
 }

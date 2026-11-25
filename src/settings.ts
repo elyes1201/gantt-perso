@@ -52,19 +52,48 @@ export class LayoutCard extends FormattingSettingsCard {
     slices: FormattingSettingsSlice[] = [this.hierarchyOrder, this.displayMode, this.showSiteBar, this.showProductBar, this.rowHeight, this.barHeightPercent, this.gridWidth, this.showSettingsButton];
 }
 
+export const MILESTONE_MAX_SIZE = 60;
+
+export const MS_POSITION_ITEMS: powerbi.IEnumMember[] = [
+    { value: "straddle", displayName: "À cheval sur la ligne et la sous-ligne" },
+    { value: "main", displayName: "Sur la ligne principale" }
+];
+
 export const SHAPE_ITEMS: powerbi.IEnumMember[] = MILESTONE_SHAPES.map(s => ({ value: s.value, displayName: s.displayName }));
 
 /** Jalons : symbole, taille, couleurs. */
 export class MilestoneCard extends FormattingSettingsCard {
     shape = new formattingSettings.ItemDropdown({ name: "shape", displayName: "Symbole du jalon", items: SHAPE_ITEMS, value: SHAPE_ITEMS[0] });
-    size = num("size", "Taille du jalon (px)", 10, 4, 40);
+    size = num("size", "Taille du jalon (px)", 10, 4, MILESTONE_MAX_SIZE);
+    position = new formattingSettings.ItemDropdown({ name: "position", displayName: "Position verticale du jalon", items: MS_POSITION_ITEMS, value: MS_POSITION_ITEMS[0] });
     fill = color("fill", "Couleur du jalon", "#f44a53");
     stroke = color("stroke", "Bordure du jalon", "#000000");
     lineColor = color("lineColor", "Couleur du trait pointillé", "#999999");
 
     name = "milestones";
     displayName = "Jalons";
-    slices: FormattingSettingsSlice[] = [this.shape, this.size, this.fill, this.stroke, this.lineColor];
+    slices: FormattingSettingsSlice[] = [this.shape, this.size, this.position, this.fill, this.stroke, this.lineColor];
+}
+
+export const SUBLINE_START_ITEMS: powerbi.IEnumMember[] = [
+    { value: "end", displayName: "Après la fin de la réunion" },
+    { value: "start", displayName: "Depuis le début de la réunion" }
+];
+
+/** Sous-ligne Relecture / Approbation sous chaque réunion. */
+export class SubLineCard extends FormattingSettingsCard {
+    show = new formattingSettings.ToggleSwitch({ name: "show", displayName: "Afficher la sous-ligne", value: true });
+    start = new formattingSettings.ItemDropdown({ name: "start", displayName: "Départ de la relecture", items: SUBLINE_START_ITEMS, value: SUBLINE_START_ITEMS[0] });
+    height = num("height", "Hauteur de la sous-ligne (px)", 14, 6, 60);
+    barPercent = num("barPercent", "Épaisseur de la barre (% de la sous-ligne)", 60, 10, 100);
+    reviewColor = color("reviewColor", "Couleur Relecture", "#f0a500");
+    approvalColor = color("approvalColor", "Couleur Approbation", "#8c564b");
+    showGridLegend = new formattingSettings.ToggleSwitch({ name: "showGridLegend", displayName: "Légende dans la grille", value: true });
+
+    name = "subLine";
+    displayName = "Relecture / Approbation";
+    topLevelSlice = this.show;
+    slices: FormattingSettingsSlice[] = [this.start, this.height, this.barPercent, this.reviewColor, this.approvalColor, this.showGridLegend];
 }
 
 /** Palette par défaut pour les sites autres que Lille / Ulis (piste, remplissage). */
@@ -181,11 +210,12 @@ export class TimelineCard extends FormattingSettingsCard {
 export class VisualFormattingSettingsModel extends FormattingSettingsModel {
     layout = new LayoutCard();
     milestones = new MilestoneCard();
+    subLine = new SubLineCard();
     siteColors = new SiteColorsCard();
     progress = new ProgressCard();
     labels = new LabelsCard();
     grid = new GridCard();
     timeline = new TimelineCard();
 
-    cards = [this.layout, this.milestones, this.siteColors, this.progress, this.labels, this.grid, this.timeline];
+    cards = [this.layout, this.milestones, this.subLine, this.siteColors, this.progress, this.labels, this.grid, this.timeline];
 }

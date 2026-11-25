@@ -29,7 +29,7 @@ import { VisualFormattingSettingsModel } from "./settings";
 import {
     Meeting, GanttRow, GroupRow, MeetingRow, RawColumns, DisplayMode, HierarchyOrder,
     buildMeetings, buildRows, groupKeysAtDepth, parseHierarchyOrder, sortSites, dateExtent, formatDate, formatPercent,
-    freeLabelInterval, truncateText, splitColor
+    freeLabelInterval, truncateText, splitColor, subSegments
 } from "./dataModel";
 import { TimeLevel, resolveHierarchy, milestonePath } from "./timeLevels";
 import { SettingsPanel, PanelState, PropValue, toInputColor } from "./settingsPanel";
@@ -112,6 +112,11 @@ export class Visual implements IVisual {
     /** Sites triés par Ordre Site (couleurs, panneau). */
     private siteList: string[] = [];
     private todayG: AnySelection;
+    /** Au moins une des colonnes Relecture / Approbation est renseignée dans le visuel. */
+    private hasSubData = false;
+    /** Ordonnée du haut de chaque ligne (hauteurs variables : ligne + sous-ligne). */
+    private rowTops: number[] = [];
+    private totalHeight = 0;
     /** Couleurs par site choisies dans le panneau intégré : site -> {track, fill}. */
     private siteOverrides: Record<string, { track?: string; fill?: string }> = {};
     /** Choix du panneau pas encore renvoyés par l'hôte ("objet.propriété" -> valeur). */
@@ -432,6 +437,15 @@ export class Visual implements IVisual {
             barHeightPercent: st.layout.barHeightPercent.value,
             milestoneShape: String(st.milestones.shape.value?.value ?? "diamond"),
             milestoneSize: this.milestoneSize(),
+            milestonePosition: String(st.milestones.position.value?.value ?? "straddle"),
+            hasSubData: this.hasSubData,
+            subShow: st.subLine.show.value,
+            subStart: String(st.subLine.start.value?.value ?? "end"),
+            subHeight: this.subLineHeight(),
+            subBarPercent: st.subLine.barPercent.value,
+            reviewColor: toInputColor(st.subLine.reviewColor.value.value),
+            approvalColor: toInputColor(st.subLine.approvalColor.value.value),
+            subLegend: st.subLine.showGridLegend.value,
             milestoneFill: toInputColor(st.milestones.fill.value.value),
             labelsShow: st.labels.show.value,
             labelsPosition: String(st.labels.position.value?.value ?? "above"),
@@ -473,7 +487,7 @@ export class Visual implements IVisual {
             this.extent = null;
             return;
         }
-        const cols: RawColumns = { site: -1, product: -1, deliverable: -1, start: -1, end: -1, milestone: -1, progress: -1, siteOrder: -1 };
+        const cols: RawColumns = { site: -1, product: -1, deliverable: -1, start: -1, end: -1, milestone: -1, progress: -1, siteOrder: -1, review: -1, approval: -1 };
         table.columns.forEach((c, i) => {
             const roles = c.roles || {};
             (Object.keys(cols) as Array<keyof RawColumns>).forEach(k => {
@@ -484,6 +498,7 @@ export class Visual implements IVisual {
         });
         const scale = String(this.settings.progress.scale.value?.value ?? "0-1");
         const res = buildMeetings(table.rows as unknown[][], cols, scale);
+        this.hasSubData = cols.review >= 0 || cols.approval >= 0;
         for (const m of res.meetings) {
             m.selectionId = this.host.createSelectionIdBuilder().withTable(table, m.rowIndex).createSelectionId();
         }
@@ -519,7 +534,7 @@ export class Visual implements IVisual {
     }
 
     private milestoneSize(): number {
-        return Math.max(4, this.settings.milestones.size.value || 10);
+        return Math.max(4, Math.min(60, this.settings.milestones.size.value || 10));
     }
 
     private labelFontSize(): number {
@@ -694,9 +709,8 @@ export class Visual implements IVisual {
         this.layout();
         this.updateScale();
 
-        const rh = this.rowHeight();
-        const totalH = this.rows.length * rh;
-        const bodyH = Math.max(totalH, 1);
+        this.computeRowTops();
+        const bodyH = Math.max(this.totalHeight, 1);
         this.bodySvg.attr("width", this.contentWidth).attr("height", bodyH);
         this.bgRect.attr("width", this.contentWidth).attr("height", Math.max(bodyH, this.tlBody.clientHeight));
 
@@ -723,12 +737,64 @@ export class Visual implements IVisual {
         });
     }
 
+    // ------------------------------------------------- lignes et sous-lignes
+
+    /** Sous-ligne Relecture / Approbation active (réglage + colonnes présentes). */
+    private subLineOn(): boolean {
+        return this.hasSubData && !!this.settings.subLine.show.value;
+    }
+
+    private subLineHeight(): number {
+        return Math.max(6, Math.min(60, this.settings.subLine.height.value || 14));
+    }
+
+    /** Lignes qui dessinent des réunions (et donc leur sous-ligne). */
+    private drawsMeetings(row: GanttRow): boolean {
+        return row.kind === "meeting" || (row.leaf && (row.collapsed || this.displayMode === "compact"));
+    }
+
+    private hasSub(row: GanttRow): boolean {
+        return this.subLineOn() && this.drawsMeetings(row);
+    }
+
+    /** Hauteur totale d'une ligne (ligne principale + sous-ligne éventuelle). */
+    private fullRowHeight(row: GanttRow): number {
+        return this.rowHeight() + (this.hasSub(row) ? this.subLineHeight() : 0);
+    }
+
+    private computeRowTops(): void {
+        const tops = new Array<number>(this.rows.length);
+        let y = 0;
+        for (let i = 0; i < this.rows.length; i++) {
+            tops[i] = y;
+            y += this.fullRowHeight(this.rows[i]);
+        }
+        this.rowTops = tops;
+        this.totalHeight = y;
+    }
+
+    /** Index de la ligne contenant l'ordonnée y (recherche dichotomique). */
+    private rowIndexAt(y: number): number {
+        let lo = 0, hi = this.rowTops.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if (this.rowTops[mid] <= y) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return Math.max(0, lo);
+    }
+
     private visibleRange(): [number, number] {
-        const rh = this.rowHeight();
+        if (this.rowTops.length !== this.rows.length) {
+            this.computeRowTops();
+        }
         const top = this.tlBody.scrollTop;
         const h = this.tlBody.clientHeight || this.viewport.height;
-        const first = Math.max(0, Math.floor(top / rh) - ROW_BUFFER);
-        const last = Math.min(this.rows.length - 1, Math.ceil((top + h) / rh) + ROW_BUFFER);
+        const first = Math.max(0, this.rowIndexAt(top) - ROW_BUFFER);
+        const last = Math.min(this.rows.length - 1, this.rowIndexAt(top + h) + ROW_BUFFER);
         return [first, last];
     }
 
@@ -877,20 +943,23 @@ export class Visual implements IVisual {
         enter.append("rect").attr("class", "grow-bg");
         enter.append("line").attr("class", "grow-sep");
         enter.append("text").attr("class", "grow-text");
+        enter.append("g").attr("class", "grow-legend");
         enter.append("title");
 
         const all = enter.merge(sel);
-        all.attr("transform", d => `translate(0,${d.index * rh})`)
+        all.attr("transform", d => `translate(0,${this.rowTops[d.index]})`)
             .attr("class", d => d.row.kind === "group"
                 ? `grow group depth-${d.row.depth} field-${d.row.field}`
                 : "grow meeting-row")
             .style("cursor", "pointer")
             .style("opacity", d => this.rowOpacity(d.row));
         all.select("rect.grow-bg")
-            .attr("width", gw).attr("height", rh)
+            .attr("width", gw).attr("height", d => this.fullRowHeight(d.row))
             .attr("fill", d => this.isTopGroup(d.row) ? siteBg : "transparent");
         all.select("line.grow-sep")
-            .attr("x1", 0).attr("x2", gw).attr("y1", rh - 0.5).attr("y2", rh - 0.5).attr("stroke", "#ececec");
+            .attr("x1", 0).attr("x2", gw)
+            .attr("y1", d => this.fullRowHeight(d.row) - 0.5).attr("y2", d => this.fullRowHeight(d.row) - 0.5)
+            .attr("stroke", "#ececec");
         all.select("text.grow-text")
             .attr("x", d => this.gridIndent(d.row))
             .attr("y", rh / 2).attr("dy", "0.35em")
@@ -904,6 +973,39 @@ export class Visual implements IVisual {
                 return truncateText(this.gridLabel(d.row), avail, str => this.measure(str, fontSize, fontFamily));
             });
         all.select("title").text(d => this.gridLabel(d.row, false));
+
+        // Légende de la sous-ligne : ■ Relecture ■ Approbation
+        const self = this;
+        all.select("g.grow-legend").each(function (d) {
+            self.renderGridLegend(select(this), d.row, gw);
+        });
+    }
+
+    private renderGridLegend(g: AnySelection, row: GanttRow, gw: number): void {
+        g.selectAll("*").remove();
+        if (!this.hasSub(row) || !this.settings.subLine.showGridLegend.value) {
+            return;
+        }
+        const sub = this.subLineHeight();
+        const fontSize = Math.max(7, Math.min(10, sub - 3));
+        const fontFamily = this.gridFontFamily();
+        const cy = this.rowHeight() + sub / 2;
+        const sw = Math.min(8, sub - 4);
+        const items: Array<[string, string]> = [
+            ["Relecture", this.settings.subLine.reviewColor.value.value],
+            ["Approbation", this.settings.subLine.approvalColor.value.value]
+        ];
+        let x = this.gridIndent(row) + 4;
+        const widths = items.map(([t]) => sw + 3 + this.measure(t, fontSize, fontFamily));
+        if (x + widths[0] + 8 + widths[1] > gw - 4 || sw < 3) {
+            return;
+        }
+        items.forEach(([label, color], i) => {
+            g.append("rect").attr("x", x).attr("y", cy - sw / 2).attr("width", sw).attr("height", sw).attr("rx", 1).attr("fill", color);
+            g.append("text").attr("x", x + sw + 3).attr("y", cy).attr("dy", "0.35em")
+                .attr("fill", "#777777").style("font-size", fontSize + "px").style("font-family", fontFamily).text(label);
+            x += widths[i] + 8;
+        });
     }
 
     private isTopGroup(row: GanttRow): boolean {
@@ -926,7 +1028,6 @@ export class Visual implements IVisual {
     // -------------------------------------------------------------- timeline
 
     private renderTimelineRows(): void {
-        const rh = this.rowHeight();
         const w = this.contentWidth;
         const [first, last] = this.visibleRange();
         const visible = this.rows.slice(first, last + 1).map((r, i) => ({ row: r, index: first + i }));
@@ -944,11 +1045,13 @@ export class Visual implements IVisual {
         enter.append("g").attr("class", "layer-milestones");
 
         const all = enter.merge(sel);
-        all.attr("transform", d => `translate(0,${d.index * rh})`);
-        all.select("rect.trow-bg").attr("width", w).attr("height", rh)
+        all.attr("transform", d => `translate(0,${this.rowTops[d.index]})`);
+        all.select("rect.trow-bg").attr("width", w).attr("height", d => this.fullRowHeight(d.row))
             .attr("fill", d => this.isTopGroup(d.row) ? siteBg : "transparent")
             .attr("fill-opacity", d => this.isTopGroup(d.row) ? 0.6 : 0);
-        all.select("line.trow-sep").attr("x1", 0).attr("x2", w).attr("y1", rh - 0.5).attr("y2", rh - 0.5).attr("stroke", "#f2f2f2");
+        all.select("line.trow-sep").attr("x1", 0).attr("x2", w)
+            .attr("y1", d => this.fullRowHeight(d.row) - 0.5).attr("y2", d => this.fullRowHeight(d.row) - 0.5)
+            .attr("stroke", "#f2f2f2");
 
         const self = this;
         all.each(function (d) {
@@ -1002,12 +1105,35 @@ export class Visual implements IVisual {
         // Position verticale de la barre
         const barTop = above ? Math.max(0, rh - bh - 2) : Math.round((rh - bh) / 2);
         const cy = barTop + bh / 2;
+
+        // Sous-ligne Relecture / Approbation (sous la ligne principale)
+        const subOn = this.hasSub(row);
+        const subH = this.subLineHeight();
+        const subPct = Math.max(10, Math.min(100, this.settings.subLine.barPercent.value || 60));
+        const subBarH = Math.max(2, Math.round(subH * subPct / 100));
+        const subTop = rh + Math.round((subH - subBarH) / 2);
+        const subCy = subTop + subBarH / 2;
+        const subStart = String(this.settings.subLine.start.value?.value) === "start" ? "start" : "end";
+        const reviewColor = this.settings.subLine.reviewColor.value.value;
+        const approvalColor = this.settings.subLine.approvalColor.value.value;
+        // Jalon : à cheval sur la ligne et la sous-ligne, ou sur la ligne principale.
+        const straddle = String(this.settings.milestones.position.value?.value ?? "straddle") !== "main";
+        const msY = subOn && straddle ? (cy + subCy) / 2 : cy;
+
         const meetings = row.kind === "meeting" ? [(row as MeetingRow).meeting] : (row as GroupRow).meetings;
+        const seg = (r: [Date, Date] | null): [number, number] | null => {
+            if (!subOn || !r) {
+                return null;
+            }
+            const a = this.x(r[0]);
+            return [a, Math.max(a + 1, this.x(r[1]))];
+        };
         const geo = meetings.map(m => {
             const x0 = this.x(m.start);
             const x1 = Math.max(x0 + 2, this.x(m.end));
             const xm = m.milestone ? this.x(m.milestone) : null;
-            return { m, x0, x1, xm };
+            const sub = subSegments(m, subStart);
+            return { m, x0, x1, xm, rev: seg(sub.review), appr: seg(sub.approval) };
         });
         const obstacles: Array<[number, number]> = geo.filter(d => d.xm !== null).map(d => [d.xm - ms / 2 - 1, d.xm + ms / 2 + 1] as [number, number]);
 
@@ -1017,6 +1143,8 @@ export class Visual implements IVisual {
         const tgEnter = tg.enter().append("g").attr("class", "meeting");
         tgEnter.append("rect").attr("class", "track");
         tgEnter.append("rect").attr("class", "fill");
+        tgEnter.append("rect").attr("class", "sub-review");
+        tgEnter.append("rect").attr("class", "sub-approval");
         const tgAll = tgEnter.merge(tg);
         tgAll.style("opacity", d => this.meetingOpacity(d.m));
         tgAll.select("rect.track")
@@ -1028,6 +1156,17 @@ export class Visual implements IVisual {
             .attr("width", d => (d.x1 - d.x0) * (d.m.progress ?? 0))
             .attr("fill", d => this.colorOf(d.m.site).fill)
             .attr("fill-opacity", d => this.colorOf(d.m.site).fillOpacity);
+        // Phases pleines (pas de progression) : Relecture puis Approbation.
+        const subRect = (cls: string, pick: (d: typeof geo[0]) => [number, number] | null, fill: string) => {
+            tgAll.select("rect." + cls)
+                .attr("display", d => pick(d) ? null : "none")
+                .attr("x", d => pick(d) ? pick(d)[0] : 0)
+                .attr("width", d => pick(d) ? pick(d)[1] - pick(d)[0] : 0)
+                .attr("y", subTop).attr("height", subBarH).attr("rx", Math.min(2, subBarH / 2))
+                .attr("fill", fill);
+        };
+        subRect("sub-review", d => d.rev, reviewColor);
+        subRect("sub-approval", d => d.appr, approvalColor);
 
         // Traits pointillés Fin -> Jalon (uniquement si Jalon après Fin)
         const lineData = geo.filter(d => d.xm !== null && d.m.milestone.getTime() > d.m.end.getTime());
@@ -1035,7 +1174,7 @@ export class Visual implements IVisual {
         ls.exit().remove();
         ls.enter().append("line").attr("class", "ms-line").merge(ls)
             .attr("x1", d => d.x1).attr("x2", d => d.xm)
-            .attr("y1", cy).attr("y2", cy)
+            .attr("y1", msY).attr("y2", msY)
             .attr("stroke", lineColor).attr("stroke-width", 1).attr("stroke-dasharray", "4,4")
             .style("opacity", d => this.meetingOpacity(d.m));
 
@@ -1131,7 +1270,7 @@ export class Visual implements IVisual {
         mss.exit().remove();
         mss.enter().append("path").attr("class", "milestone").merge(mss)
             .attr("d", shapePath)
-            .attr("transform", d => `translate(${d.xm},${cy})`)
+            .attr("transform", d => `translate(${d.xm},${msY})`)
             .attr("fill", msFill).attr("stroke", msStroke).attr("stroke-width", 1)
             .style("opacity", d => this.meetingOpacity(d.m));
     }
@@ -1289,6 +1428,10 @@ export class Visual implements IVisual {
             { displayName: "Début", value: formatDate(m.start, fmt) },
             { displayName: "Fin", value: formatDate(m.end, fmt) },
             { displayName: "Jalons", value: formatDate(m.milestone, fmt) },
+            ...(this.hasSubData ? [
+                { displayName: "Relecture", value: formatDate(m.review, fmt) },
+                { displayName: "Approbation", value: formatDate(m.approval, fmt) }
+            ] : []),
             { displayName: "Progress", value: formatPercent(m.progress) }
         ];
     }
